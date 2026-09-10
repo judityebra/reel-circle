@@ -2,6 +2,8 @@
 
 A privacy-first group movie recommender that turns Letterboxd histories into a fair, explainable shortlist. Reel Circle combines conversational constraints, graph-based taste signals, local neural models, and human approval gates to help a group choose what to watch.
 
+[**Open the live demo**](https://reel-circle-one.vercel.app/)
+
 ![Reel Circle decision room](docs/reel-circle-dashboard.png)
 
 ## Why this project
