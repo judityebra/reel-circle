@@ -1,4 +1,4 @@
-import { fetchEnrichedMovie, getTmdbAuthentication, tmdbUrl } from './tmdb-client'
+import { fetchEnrichedMovie, getTmdbAuthentication, tmdbUrl } from './tmdb-client.js'
 
 interface ServerlessRequest {
   method?: string

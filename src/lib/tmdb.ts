@@ -1,4 +1,4 @@
-import type { Movie } from './recommendation'
+import type { Movie } from './recommendation.js'
 
 interface Provider {
   provider_name: string

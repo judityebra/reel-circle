@@ -1,4 +1,4 @@
-import { normalizeTmdbMovie, type TmdbMovieDetails } from '../src/lib/tmdb'
+import { normalizeTmdbMovie, type TmdbMovieDetails } from '../src/lib/tmdb.js'
 
 const tmdbBaseUrl = 'https://api.themoviedb.org/3'
 
