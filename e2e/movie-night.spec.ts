@@ -35,3 +35,11 @@ test('completes the primary movie-night workflow', async ({ page }) => {
   await page.getByRole('button', { name: 'Cambiar a modo oscuro' }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
 })
+
+test('keeps the compact header on one row', async ({ page }) => {
+  await page.setViewportSize({ width: 640, height: 844 })
+
+  await expect(page.locator('.privacy-note')).toBeHidden()
+  await expect(page.locator('.topbar')).toHaveCSS('height', '64px')
+  await expect(page.getByRole('button', { name: 'Open AI lab' })).toHaveCSS('width', '34px')
+})

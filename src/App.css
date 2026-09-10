@@ -360,6 +360,8 @@ footer { margin-top: 18px; min-height: 60px; padding: 0 4px; }
 @media (max-width: 640px) {
 	main { padding-inline: 14px; }
 	.topbar { margin-inline: -14px; padding-inline: 14px; }
+	.topbar-meta .privacy-note { display: none; }
+	.topbar-meta .lab-toggle { width: 34px; padding: 0; justify-content: center; font-size: 0; }
 	.primary-agent { margin-top: 14px; padding: 14px; }
 	.primary-agent .agent-command { grid-template-columns: 24px 1fr; }
 	.primary-agent .agent-command input, .primary-agent .agent-command > button { grid-column: 1 / -1; }
