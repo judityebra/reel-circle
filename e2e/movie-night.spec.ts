@@ -43,3 +43,10 @@ test('keeps the compact header on one row', async ({ page }) => {
   await expect(page.locator('.topbar')).toHaveCSS('height', '64px')
   await expect(page.getByRole('button', { name: 'Open AI lab' })).toHaveCSS('width', '34px')
 })
+
+test('publishes Reel Circle social preview metadata', async ({ page }) => {
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/favicon.svg')
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', 'Reel Circle — Find tonight\'s film')
+  await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', 'https://reel-circle-one.vercel.app/social-preview.png')
+  await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary_large_image')
+})
