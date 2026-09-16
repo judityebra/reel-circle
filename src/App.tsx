@@ -3,8 +3,9 @@ import { Background, Controls, ReactFlow, useNodesState, type Edge, type Node } 
 import '@xyflow/react/dist/style.css'
 import { Activity, BarChart3, Bot, BrainCircuit, Check, CheckCircle2, ChevronRight, Clock3, Copy, Cpu, Database, Download, Film, FlaskConical, GitCompareArrows, Heart, Layers3, LoaderCircle, MessageSquareText, MonitorPlay, Moon, Network, Play, Plus, Route, RotateCcw, Search, Share2, ShieldCheck, Shuffle, Sparkles, Sun, Target, Thermometer, ThumbsDown, Trash2, Upload, Users, X } from 'lucide-react'
 import { catalog as demoCatalog, demoProfiles, profileColors } from './data'
+import { requestAgentTurn } from './lib/agent-api'
 import { evaluateAgentTrace, scoreAgentRun } from './lib/agent-evaluation'
-import { describeConstraints, parseConstraintPrompt } from './lib/constraints'
+import { createConversationPreferences, describeConstraints, parseConstraintPrompt, updateConversationPreferences, type ConversationPreferences } from './lib/constraints'
 import { runDecisionAgent, type AgentTraceEntry } from './lib/decision-agent'
 import { compareRankings, explainRecommendationPath, getDisagreement, type ExperimentRecord } from './lib/experiments'
 import { trainGraphNeuralTaste, type GraphNeuralResult } from './lib/graph-neural'
@@ -13,14 +14,21 @@ import { summarizeFeedback } from './lib/metrics'
 import { fetchMovieCatalog, searchMovieCatalog } from './lib/movie-api'
 import { buildNeuralExamples, trainNeuralTaste, type NeuralTasteResult } from './lib/neural'
 import { resolveLocale, translate, type Locale } from './lib/i18n'
-import { applyComparisonFeedback, applyTasteFeedback, chooseTasteQuestion, getMovieFeatures, scoreCandidates, type Movie, type Profile, type RankingMode, type TasteFeedback } from './lib/recommendation'
-import { clearAllLocalData, decodeSharedRoom, encodeSharedRoom, loadCachedCatalog, loadSession, removeSeedProfiles, saveCachedCatalog, saveSession, type FeedbackEvent, type SessionSnapshot } from './lib/session'
+import { applyComparisonFeedback, applyTasteFeedback, chooseTasteQuestion, explainPreferenceMatch, getMovieFeatures, scoreCandidates, type Movie, type Profile, type RankingMode, type TasteFeedback } from './lib/recommendation'
+import { clearAllLocalData, decodeSharedRoom, encodeSharedRoom, loadCachedCatalog, loadSession, removeSeedProfiles, saveCachedCatalog, saveSession, type ConversationMessage, type FeedbackEvent, type SessionSnapshot } from './lib/session'
 import { resolveTheme, type ThemePreference } from './lib/theme'
 import './App.css'
 
 const genres = ['Drama', 'Comedy', 'Mystery', 'Romance', 'Sci-Fi']
 const moods = ['Gentle', 'Playful', 'Electric', 'Reflective', 'Twisty']
 const platforms = ['Netflix', 'Prime Video', 'Movistar Plus+', 'Filmin', 'MUBI', 'Max', 'Disney+', 'SkyShowtime']
+const vibePrompts = [
+  ['Cozy', 'Something cozy and gentle'],
+  ['Romantic', 'Something romantic but not cheesy'],
+  ['Make me think', 'Something thoughtful and mind-bending'],
+  ['Just laugh', 'A playful comedy'],
+  ['Dark & mysterious', 'Something dark and mysterious'],
+] as const
 const catalogPageCount = Number(import.meta.env.VITE_MOVIE_CATALOG_PAGES) || 10
 const fallbackPoster = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450"%3E%3Crect width="300" height="450" fill="%2320221f"/%3E%3Ccircle cx="150" cy="205" r="72" fill="none" stroke="%23087d67" stroke-width="18"/%3E%3Ccircle cx="150" cy="205" r="28" fill="%23f15b2a"/%3E%3Ctext x="150" y="350" text-anchor="middle" fill="white" font-family="sans-serif" font-size="24" letter-spacing="4"%3EREEL CIRCLE%3C/text%3E%3C/svg%3E'
 
@@ -60,6 +68,9 @@ function App() {
   const [rankingMode, setRankingMode] = useState<RankingMode>('balanced')
   const [constraintPrompt, setConstraintPrompt] = useState('')
   const [promptInterpretation, setPromptInterpretation] = useState<string[] | null>(null)
+  const [conversationPreferences, setConversationPreferences] = useState<ConversationPreferences>(() => createConversationPreferences())
+  const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([])
+  const [conversationStatus, setConversationStatus] = useState<'idle' | 'thinking'>('idle')
   const [selectedId, setSelectedId] = useState('')
   const [activeProfileId, setActiveProfileId] = useState('')
   const [feedbackNotice, setFeedbackNotice] = useState('')
@@ -108,12 +119,12 @@ function App() {
     return Math.min(0.5, averageConfidence / 200)
   }, [activeModelResults])
   const baselineRecommendations = useMemo(
-    () => scoreCandidates(movieCatalog, profiles, { maxRuntime, genres: activeGenres, platforms: activePlatforms, moods: activeMoods, rankingMode }),
-    [movieCatalog, profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, rankingMode],
+    () => scoreCandidates(movieCatalog, profiles, { maxRuntime, genres: activeGenres, excludedGenres: conversationPreferences.excludedGenres, platforms: activePlatforms, moods: activeMoods, yearRange: conversationPreferences.yearRange, languages: conversationPreferences.languages, rankingMode }),
+    [movieCatalog, profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, conversationPreferences, rankingMode],
   )
   const recommendations = useMemo(
-    () => scoreCandidates(movieCatalog, profiles, { maxRuntime, genres: activeGenres, platforms: activePlatforms, moods: activeMoods, rankingMode, neuralScores: neuralEnabled ? neuralScores : undefined, neuralBlend: neuralEnabled ? neuralBlend : 0 }),
-    [movieCatalog, profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, rankingMode, neuralEnabled, neuralScores, neuralBlend],
+    () => scoreCandidates(movieCatalog, profiles, { maxRuntime, genres: activeGenres, excludedGenres: conversationPreferences.excludedGenres, platforms: activePlatforms, moods: activeMoods, yearRange: conversationPreferences.yearRange, languages: conversationPreferences.languages, rankingMode, neuralScores: neuralEnabled ? neuralScores : undefined, neuralBlend: neuralEnabled ? neuralBlend : 0 }),
+    [movieCatalog, profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, conversationPreferences, rankingMode, neuralEnabled, neuralScores, neuralBlend],
   )
   const selected = recommendations.find(({ movie }) => movie.id === selectedId) ?? recommendations[0]
   const activeProfile = profiles.find(({ id }) => id === activeProfileId) ?? profiles[0]
@@ -253,6 +264,8 @@ function App() {
             setGraphNeuralResults(stored.graphNeuralResults ?? {})
             setExperiments(stored.experiments ?? [])
             setAgentTrace(stored.agentTrace ?? [])
+            setConversationPreferences(stored.conversationPreferences ?? createConversationPreferences())
+            setConversationMessages(stored.conversationMessages ?? [])
             setRestoredPositions(stored.nodePositions)
           } else {
             setProfiles(demoProfiles)
@@ -317,8 +330,8 @@ function App() {
 
   useEffect(() => {
     if (!hydrated) return
-    void saveSession({ profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, rankingMode, activeProfileId, nodePositions: restoredPositions, feedbackEvents, neuralResults, graphNeuralResults, experiments, agentTrace })
-  }, [hydrated, profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, rankingMode, activeProfileId, restoredPositions, feedbackEvents, neuralResults, graphNeuralResults, experiments, agentTrace])
+    void saveSession({ profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, rankingMode, activeProfileId, nodePositions: restoredPositions, feedbackEvents, neuralResults, graphNeuralResults, experiments, agentTrace, conversationPreferences, conversationMessages })
+  }, [hydrated, profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, rankingMode, activeProfileId, restoredPositions, feedbackEvents, neuralResults, graphNeuralResults, experiments, agentTrace, conversationPreferences, conversationMessages])
 
   useEffect(() => {
     if (!tasteQuestion) return
@@ -611,15 +624,65 @@ function App() {
     setAgentStatus('idle')
   }
 
-  const applyConstraintPrompt = () => {
-    const parsed = parseConstraintPrompt(constraintPrompt)
-    setActiveGenres(parsed.genres ?? [])
-    setActivePlatforms(parsed.platforms ?? [])
-    setActiveMoods(parsed.moods ?? [])
-    setMaxRuntime(parsed.maxRuntime)
-    if (parsed.rankingMode) setRankingMode(parsed.rankingMode)
-    setPromptInterpretation(describeConstraints(parsed))
-    setFeedbackNotice(constraintPrompt.trim() ? 'Agent translated your request into filters' : 'Agent filters cleared')
+  const applyConstraintPrompt = async (suggestedPrompt?: string) => {
+    const prompt = suggestedPrompt ?? constraintPrompt
+    if (!prompt.trim() || conversationStatus === 'thinking') return
+    setConversationStatus('thinking')
+    const apiUrl = import.meta.env.VITE_MOVIE_API_URL as string | undefined
+    let next = updateConversationPreferences(conversationPreferences, prompt)
+    let reply: string | undefined
+    let selectedMovieId: string | undefined
+    if (apiUrl) {
+      try {
+        const result = await requestAgentTurn(apiUrl, prompt, conversationPreferences, movieCatalog, profiles)
+        next = result.preferences
+        selectedMovieId = result.recommendations[0]?.movie.id
+        reply = result.clarificationQuestion ?? (result.recommendations.length
+          ? `I used ${result.meta.trace.length} agent steps to find ${result.recommendations.length} strong matches. ${result.recommendations[0].explanation}`
+          : 'Nothing fits every hard constraint yet. Tell me which detail matters least and I will widen that boundary.')
+        setFeedbackNotice(`${result.meta.extractionMode === 'model' ? 'LLM' : 'Deterministic'} agent · ${result.meta.durationMs} ms · ${result.meta.trace.length} steps`)
+      } catch {
+        setFeedbackNotice('Agent API unavailable; local preference engine used')
+      }
+    }
+    setConversationPreferences(next)
+    setActiveGenres(next.genres ?? [])
+    setActivePlatforms(next.platforms ?? [])
+    setActiveMoods(next.moods ?? [])
+    setMaxRuntime(next.maxRuntime)
+    if (next.rankingMode) setRankingMode(next.rankingMode)
+    const descriptions = [
+      ...describeConstraints(next),
+      ...next.excludedGenres.map((genre) => `No ${genre}`),
+      ...(next.languages ?? []).map((language) => language.toUpperCase()),
+      ...(next.yearRange ? [`${next.yearRange[0]}-${next.yearRange[1]}`] : []),
+    ]
+    setPromptInterpretation([...new Set(descriptions.filter((value) => value !== 'Any movie'))])
+    const nextCount = scoreCandidates(movieCatalog, profiles, next).length
+    reply ??= nextCount
+      ? `I found ${nextCount} matches and kept your earlier preferences in the mix. You can refine these without starting over.`
+      : 'Nothing fits every hard constraint yet. Tell me which detail matters least and I will widen that boundary.'
+    const timestamp = Date.now()
+    const newMessages: ConversationMessage[] = [
+      { id: crypto.randomUUID(), role: 'user', content: prompt, timestamp },
+      { id: crypto.randomUUID(), role: 'agent', content: reply, timestamp: timestamp + 1 },
+    ]
+    setConversationMessages((current) => [...current, ...newMessages].slice(-8))
+    if (selectedMovieId) setSelectedId(selectedMovieId)
+    setConstraintPrompt('')
+    if (!apiUrl) setFeedbackNotice('Local agent updated this session from your request')
+    setConversationStatus('idle')
+  }
+
+  const resetConversation = () => {
+    setConversationPreferences(createConversationPreferences())
+    setConversationMessages([])
+    setPromptInterpretation(null)
+    setActiveGenres([])
+    setActivePlatforms([])
+    setActiveMoods([])
+    setMaxRuntime(undefined)
+    setFeedbackNotice('Conversation preferences reset')
   }
 
   const createSnapshot = (): SessionSnapshot => ({
@@ -636,6 +699,8 @@ function App() {
     graphNeuralResults,
     experiments,
     agentTrace,
+    conversationPreferences,
+    conversationMessages,
   })
 
   const shareRoom = async () => {
@@ -778,12 +843,16 @@ function App() {
       </header>
 
       <section className="agent-console primary-agent" aria-label="Conversational movie agent">
+        {conversationMessages.length > 0 && <div className="conversation-thread" aria-live="polite">
+          {conversationMessages.slice(-4).map((message) => <div className={`conversation-message ${message.role}`} key={message.id}><span>{message.role === 'agent' ? <Sparkles size={13} /> : <Users size={13} />}</span><p>{message.content}</p></div>)}
+        </div>}
         <div className="agent-command">
           <MessageSquareText size={19} />
           <label htmlFor="constraint-prompt"><strong>{t('promptTitle')}</strong><small>{t('promptHelp')}</small></label>
-          <input id="constraint-prompt" value={constraintPrompt} onChange={(event) => setConstraintPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') applyConstraintPrompt() }} placeholder={t('promptPlaceholder')} />
-          <button type="button" onClick={applyConstraintPrompt}><Sparkles size={15} /> {t('apply')}</button>
+          <input id="constraint-prompt" value={constraintPrompt} onChange={(event) => setConstraintPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void applyConstraintPrompt() }} placeholder={t('promptPlaceholder')} />
+          <button type="button" onClick={() => void applyConstraintPrompt()} disabled={!constraintPrompt.trim() || conversationStatus === 'thinking'}>{conversationStatus === 'thinking' ? <LoaderCircle size={15} /> : <Sparkles size={15} />} {conversationStatus === 'thinking' ? 'Thinking' : t('apply')}</button>
         </div>
+        <div className="vibe-row"><span>Tonight's vibe</span>{vibePrompts.map(([label, prompt]) => <button type="button" key={label} onClick={() => void applyConstraintPrompt(prompt)} disabled={conversationStatus === 'thinking'}>{label}</button>)}<button className="reset-conversation" type="button" onClick={resetConversation} title="Reset conversation" aria-label="Reset conversation"><RotateCcw size={13} /></button></div>
         {promptInterpretation && <div className="agent-interpretation"><span><CheckCircle2 size={14} /> {t('understood')}</span><div>{promptInterpretation.map((constraint) => <em key={constraint}>{displayValue(locale, constraint)}</em>)}</div><small>{recommendations.length} {t('matchesNow')}</small></div>}
         {labMode && <div className="agent-settings">
           <div><label><Target size={14} /> {locale === 'es' ? 'Estrategia del grupo' : 'Group strategy'}</label><div className="strategy-options">{([
@@ -854,7 +923,7 @@ function App() {
           <div className="panel-heading"><div><p className="eyebrow"><Sparkles size={14} /> 04 · {t('decide')}</p><h2>{t('tonightShortlist')}</h2></div><span>{recommendations.length} {t('matches')}</span></div>
           {selected ? <div className="hero-pick">
             <div className="poster-wrap"><img src={selected.movie.poster} alt={`${selected.movie.title} poster`} onError={usePosterFallback} /><span>{selected.score}%</span></div>
-            <div className="pick-copy"><p className="rank">{t('bestBet')}</p><h3>{selected.movie.title}</h3><p className="metadata">{selected.movie.year} · {selected.movie.runtime} min · {displayValue(locale, selected.movie.tone ?? '')}</p><div className="availability">{selected.movie.platforms.map((platform) => <span key={platform}>{platform}</span>)}</div><p className="reason">{localizeReason(locale, selected.reasons[0])}. {localizeReason(locale, selected.reasons[1])}.</p>
+            <div className="pick-copy"><p className="rank">{t('bestBet')}</p><h3>{selected.movie.title}</h3><p className="metadata">{selected.movie.year} · {selected.movie.runtime} min · {displayValue(locale, selected.movie.tone ?? '')}</p><div className="availability">{selected.movie.platforms.map((platform) => <span key={platform}>{platform}</span>)}</div><p className="reason">{conversationMessages.length ? explainPreferenceMatch(selected.movie, { ...conversationPreferences, maxRuntime, genres: activeGenres, platforms: activePlatforms, moods: activeMoods }) : `${localizeReason(locale, selected.reasons[0])}. ${localizeReason(locale, selected.reasons[1])}.`}</p>
               <div className="profile-scores">{selected.matchByProfile.map((match) => { const profile = profiles.find(({ id }) => id === match.profileId); return <span key={match.profileId} style={{ '--person': profile?.color } as CSSProperties}><i />{profile?.name} {match.score}%</span> })}</div>
             </div>
           </div> : <div className="empty-state"><Film size={30} /><strong>{t('noMatches')}</strong><span>{t('widenFilters')}</span></div>}

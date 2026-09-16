@@ -1,6 +1,6 @@
 # Reel Circle
 
-A privacy-first group movie recommender that turns Letterboxd histories into a fair, explainable shortlist. Reel Circle combines conversational constraints, graph-based taste signals, local neural models, and human approval gates to help a group choose what to watch.
+A privacy-first, conversational group movie recommender that turns Letterboxd histories and natural-language requests into a fair, explainable shortlist. Reel Circle combines stateful preferences, graph-based taste signals, local neural models, and human approval gates to help a group choose what to watch.
 
 [**Open the live demo**](https://reel-circle-one.vercel.app/)
 
@@ -19,6 +19,8 @@ The default experience is a focused decision dashboard. The optional AI lab expo
 - **Recommendation system:** deterministic ranking plus confidence-weighted MLP and two-layer GCN prototypes.
 - **Group fairness:** balanced, average, least-misery, and Nash aggregation strategies.
 - **Agent safety:** an eight-step bounded plan-act-observe loop with typed tools, persistent traces, and approval gates.
+- **Conversation memory:** typed session preferences preserve exclusions and refinements without storing personal data on a server.
+- **Server agent:** optional OpenAI-compatible structured extraction with deterministic fallback, candidate tools, validation, latency, and trace metadata.
 - **Quality:** 63 unit tests, an end-to-end movie-night workflow, ESLint, production builds, and dependency auditing in CI.
 
 ## Project documentation
@@ -30,7 +32,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system boundaries, data flow, privacy
 ## Advanced features
 
 - IndexedDB persistence for profiles, learned preferences, filters, graph positions, and feedback history.
-- Bilingual conversational constraints such as `Algo divertido en Filmin de menos de 90 minutos`.
+- Iterative conversational constraints such as `No horror` followed by `Something darker, under 90 minutes`.
+- Vibe shortcuts for cozy, romantic, thoughtful, funny, and dark recommendations.
+- Structured runtime, genre, negative genre, mood, provider, language, release-period, group-size, and viewing-context extraction.
+- Recommendation explanations grounded in the active conversation state.
 - Balanced, average, least-misery, and Nash group-ranking strategies.
 - Active-learning comparisons and direct skip, pick, and post-watch feedback.
 - Deep graph signals for directors, languages, moods, and decades.
@@ -83,6 +88,12 @@ The live client loads ten paginated TMDB discovery pages by default, producing a
 
 Successful live catalogs are cached in IndexedDB for 24 hours and rendered immediately on later visits while a background refresh runs. If refresh fails, the app keeps the cache or falls back to the curated catalog with an explicit status message.
 
+## Optional LLM agent
+
+`POST /api/agent` accepts a conversation turn, current typed preferences, privacy-safe profile weights, and bounded movie candidates. It performs structured preference extraction, filtering, ranking, and hard-constraint validation. Set `OPENAI_API_KEY` and optionally `OPENAI_MODEL` or `OPENAI_BASE_URL` in the server environment to enable model extraction. Without those variables, the endpoint remains functional through deterministic extraction.
+
+The browser never receives the model key and strips raw ratings and watched-film history before calling the agent. See [docs/AGENT_API.md](docs/AGENT_API.md) for the contract.
+
 ## Import Letterboxd data
 
 1. In Letterboxd, open **Settings → Import & Export** and request an export.
@@ -99,6 +110,7 @@ Parsing and recommendations run entirely in the browser. Files are not uploaded 
 - Community rating, each person's genre affinity, and short runtime contribute to the score.
 - Large differences between people's scores reduce the group score.
 - Runtime and genre controls filter the shortlist and graph immediately.
+- Conversational turns merge into session state, so later refinements preserve earlier hard exclusions.
 - Platform controls match any selected provider and can be combined with the other filters.
 - Select a person, then use **Skip**, **Picked**, or **Loved it** to teach their local taste model. Learned genre weights immediately alter rankings and graph edges.
 - Run **Ask a taste question** to compare two deliberately contrasting, uncertain candidates. The answer updates positive and negative signals in one step.
@@ -107,6 +119,10 @@ Parsing and recommendations run entirely in the browser. Files are not uploaded 
 The curated fallback in `src/data.ts` has illustrative Spain availability. The configured TMDB endpoint supplies live metadata and watch-provider data. Provider listings still depend on TMDB coverage and should be treated as discovery information rather than a purchase guarantee.
 
 Shared room links are asynchronous snapshots, not real-time collaboration. They deliberately omit private viewing history. Real-time voting would require an authenticated service such as Supabase Realtime.
+
+## Roadmap boundary
+
+The repository currently implements a typed server agent with optional hosted LLM extraction, deterministic fallback, local neural ranking, TMDB tools, stateful conversation memory, evaluation, and observable traces. LangGraph persistence and embedding-backed vector retrieval remain planned backend phases. Credentials stay server-side.
 
 The Experiment Lab provides local backup and delete-all-data controls. Delete removes profiles, ratings, model outputs, traces, and cached catalog data. TMDB metadata and images require TMDB attribution; the application footer includes the required non-endorsement notice.
 

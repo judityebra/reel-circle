@@ -38,8 +38,11 @@ export type RankingMode = 'balanced' | 'average' | 'least-misery' | 'nash'
 export interface RecommendationOptions {
   maxRuntime?: number
   genres?: string[]
+  excludedGenres?: string[]
   platforms?: string[]
   moods?: string[]
+  yearRange?: [number, number]
+  languages?: string[]
   rankingMode?: RankingMode
   neuralScores?: Record<string, Record<string, number>>
   neuralBlend?: number
@@ -53,6 +56,20 @@ export interface Recommendation {
 }
 
 export type TasteFeedback = 'skip' | 'pick' | 'love'
+export function explainPreferenceMatch(movie: Movie, options: RecommendationOptions): string {
+  const matchedGenres = (options.genres ?? []).filter((genre) => movie.genres.includes(genre))
+  const matchedMoods = (options.moods ?? []).filter((mood) => movie.moods?.includes(mood))
+  const details = [
+    ...(matchedGenres.length ? [`your ${matchedGenres.join(' and ').toLowerCase()} preference`] : []),
+    ...(matchedMoods.length ? [`the ${matchedMoods.join(' and ').toLowerCase()} mood`] : []),
+    ...(options.maxRuntime ? [`your under-${options.maxRuntime}-minute limit`] : []),
+    ...(options.yearRange ? [`your ${options.yearRange[0]}-${options.yearRange[1]} release window`] : []),
+    ...(options.languages?.length && movie.language ? [`your ${movie.language.toUpperCase()} language choice`] : []),
+  ]
+  if (!details.length) return `${movie.title} rises to the top from the group's ratings and learned taste signals.`
+  const exclusions = options.excludedGenres?.length ? ` It also avoids ${options.excludedGenres.join(' and ').toLowerCase()}.` : ''
+  return `${movie.title} matches ${details.join(', ')}.${exclusions}`
+}
 
 const normalizedTitle = (title: string) => title
   .normalize('NFD')
@@ -65,6 +82,18 @@ const filmKey = ({ title, year, tmdbId }: FilmRef) =>
   tmdbId ? `tmdb:${tmdbId}` : `${normalizedTitle(title)}::${year ?? ''}`
 
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)))
+
+const languageAliases: Record<string, string> = {
+  en: 'english',
+  es: 'spanish',
+  fr: 'french',
+  ja: 'japanese',
+  ko: 'korean',
+  de: 'german',
+  it: 'italian',
+}
+
+const normalizedLanguage = (value: string) => languageAliases[value.toLowerCase()] ?? value.toLowerCase()
 
 export const getMovieFeatures = (movie: Movie) => [
   ...(movie.director ? [`director:${movie.director}`] : []),
@@ -166,12 +195,16 @@ export function scoreCandidates(
 ): Recommendation[] {
   const watched = new Set(profiles.flatMap((profile) => profile.watched.map(filmKey)))
   const requestedGenres = options.genres ?? []
+  const excludedGenres = options.excludedGenres ?? []
   const requestedPlatforms = options.platforms ?? []
   const requestedMoods = options.moods ?? []
 
   return catalog
     .filter((movie) => !watched.has(filmKey(movie)))
     .filter((movie) => !options.maxRuntime || movie.runtime <= options.maxRuntime)
+    .filter((movie) => !excludedGenres.some((genre) => movie.genres.includes(genre)))
+    .filter((movie) => !options.yearRange || (movie.year >= options.yearRange[0] && movie.year <= options.yearRange[1]))
+    .filter((movie) => !options.languages?.length || (movie.language && options.languages.some((language) => normalizedLanguage(language) === normalizedLanguage(movie.language!))))
     .filter(
       (movie) =>
         requestedGenres.length === 0 ||

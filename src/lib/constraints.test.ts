@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeConstraints, parseConstraintPrompt } from './constraints'
+import { createConversationPreferences, describeConstraints, parseConstraintPrompt, updateConversationPreferences } from './constraints'
 
 describe('parseConstraintPrompt', () => {
   it('extracts Spanish runtime, platform, genre, and fairness constraints', () => {
@@ -48,5 +48,29 @@ describe('parseConstraintPrompt', () => {
       'Netflix',
     ])
     expect(describeConstraints(parseConstraintPrompt('surprise me'))).toEqual(['Any movie'])
+  })
+
+  it('preserves negative preferences across conversational refinements', () => {
+    const firstTurn = updateConversationPreferences(createConversationPreferences(1), 'I do not want horror', 2)
+    const secondTurn = updateConversationPreferences(firstTurn, 'Something darker, under 90 minutes', 3)
+
+    expect(secondTurn).toMatchObject({
+      genres: [],
+      excludedGenres: ['Horror'],
+      moods: ['Twisty'],
+      maxRuntime: 90,
+      lastUpdatedAt: 3,
+    })
+  })
+
+  it('extracts group context, language, and release period', () => {
+    const preferences = updateConversationPreferences(createConversationPreferences(), 'Movie night with 4 friends, French films from the 1990s')
+
+    expect(preferences).toMatchObject({
+      peopleCount: 4,
+      viewingContext: 'movie-night',
+      languages: ['fr'],
+      yearRange: [1990, 1999],
+    })
   })
 })

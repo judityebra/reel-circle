@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aggregateGroupScore, applyComparisonFeedback, applyTasteFeedback, chooseTasteQuestion, scoreCandidates, type Movie, type Profile } from './recommendation'
+import { aggregateGroupScore, applyComparisonFeedback, applyTasteFeedback, chooseTasteQuestion, explainPreferenceMatch, scoreCandidates, type Movie, type Profile } from './recommendation'
 
 const catalog: Movie[] = [
   { id: 'arrival-2016', title: 'Arrival', year: 2016, runtime: 116, genres: ['Drama', 'Sci-Fi'], platforms: ['Paramount+'], rating: 4.1 },
@@ -63,6 +63,21 @@ describe('scoreCandidates', () => {
     expect(results.map(({ movie }) => movie.title)).toEqual(['Aftersun'])
   })
 
+  it('enforces explicit genre exclusions', () => {
+    const results = scoreCandidates(catalog, profiles, { excludedGenres: ['Drama'] })
+
+    expect(results.map(({ movie }) => movie.title)).toEqual(['Clue'])
+  })
+
+  it('matches ISO language constraints to TMDB display languages', () => {
+    const localizedCatalog = [
+      { ...catalog[1], id: 'french', language: 'French' },
+      { ...catalog[2], id: 'english', language: 'English' },
+    ]
+
+    expect(scoreCandidates(localizedCatalog, profiles, { languages: ['fr'] }).map(({ movie }) => movie.id)).toEqual(['french'])
+  })
+
   it('uses learned reactions to adapt a person’s ranking', () => {
     const adaptableCatalog: Movie[] = [
       { id: 'drama', title: 'A Drama', year: 2020, runtime: 110, genres: ['Drama'], platforms: ['Filmin'], rating: 4 },
@@ -88,6 +103,12 @@ describe('scoreCandidates', () => {
     expect(result.reasons.length).toBeGreaterThan(0)
     expect(result.score).toBeGreaterThanOrEqual(0)
     expect(result.score).toBeLessThanOrEqual(100)
+  })
+
+  it('explains a recommendation from the active request', () => {
+    expect(explainPreferenceMatch(catalog[2], { genres: ['Comedy'], maxRuntime: 100, excludedGenres: ['Horror'] })).toBe(
+      'Clue matches your comedy preference, your under-100-minute limit. It also avoids horror.',
+    )
   })
 
   it('blends neural predictions into explainable per-person scores', () => {

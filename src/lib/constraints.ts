@@ -39,9 +39,87 @@ const normalize = (value: string) => value
   .replace(/[\u0300-\u036f]/g, '')
   .toLowerCase()
 
+export interface ConversationPreferences extends RecommendationOptions {
+  excludedGenres: string[]
+  peopleCount?: number
+  viewingContext?: string
+  lastUpdatedAt: number
+}
+
+const isNegated = (value: string, matchIndex: number) => {
+  const prefix = value.slice(Math.max(0, matchIndex - 28), matchIndex)
+  return /(?:\bno\b|\bnot\b|without|avoid|exclude|dont want|do not want|nada de|sin)\s*(?:anything\s+)?$/.test(prefix)
+}
+
+const extractGenreSignals = (normalized: string) => {
+  const included: string[] = []
+  const excluded: string[] = []
+  genreTerms.forEach(([genre, pattern]) => {
+    const match = pattern.exec(normalized)
+    if (!match) return
+    ;(isNegated(normalized, match.index) ? excluded : included).push(genre)
+  })
+  if (/\b(?:not futuristic|nothing futuristic|dont want anything futuristic|no futuristic)\b/.test(normalized)) excluded.push('Sci-Fi')
+  return { included: [...new Set(included)], excluded: [...new Set(excluded)] }
+}
+
+export function createConversationPreferences(now = Date.now()): ConversationPreferences {
+  return { genres: [], excludedGenres: [], platforms: [], moods: [], lastUpdatedAt: now }
+}
+
+export function updateConversationPreferences(
+  current: ConversationPreferences,
+  prompt: string,
+  now = Date.now(),
+): ConversationPreferences {
+  const normalized = normalize(prompt).replace(/[’']/g, '')
+  const reset = /\b(start over|reset|clear (?:my )?preferences|forget that|empezar de nuevo|borrar preferencias)\b/.test(normalized)
+  const base = reset ? createConversationPreferences(now) : current
+  const parsed = parseConstraintPrompt(prompt)
+  const genreSignals = extractGenreSignals(normalized)
+  const removeIntense = /\b(less intense|not (?:too )?intense|menos intens[oa])\b/.test(normalized)
+  const peopleMatch = normalized.match(/\b(?:with|for|somos|con)\s+(\d{1,2})\s+(?:friends?|people|personas?|amigos?)\b/)
+    ?? normalized.match(/\bmovie night with (\d{1,2})\b/)
+  const yearMatch = normalized.match(/\b(?:from|after|since|desde|posterior a)\s+(19\d{2}|20\d{2})\b/)
+  const decadeMatch = normalized.match(/\b((?:19|20)\d0)s\b/)
+  const languageTerms: Array<[string, RegExp]> = [
+    ['en', /\b(?:english|ingles)\b/],
+    ['es', /\b(?:spanish|espanol)\b/],
+    ['fr', /\b(?:french|frances)\b/],
+    ['ko', /\b(?:korean|coreano)\b/],
+    ['ja', /\b(?:japanese|japones)\b/],
+  ]
+  const languages = languageTerms.filter(([, pattern]) => pattern.test(normalized)).map(([language]) => language)
+  const nextGenres = [...new Set([...(base.genres ?? []), ...genreSignals.included])]
+    .filter((genre) => !genreSignals.excluded.includes(genre))
+  const nextExcludedGenres = [...new Set([...base.excludedGenres, ...genreSignals.excluded])]
+    .filter((genre) => !genreSignals.included.includes(genre))
+  const nextMoods = [...new Set([...(base.moods ?? []), ...(parsed.moods ?? []), ...(/\b(dark|darker|mysterious|oscura?|misterios[oa])\b/.test(normalized) ? ['Twisty'] : [])])]
+    .filter((mood) => !(removeIntense && mood === 'Electric'))
+
+  return {
+    ...base,
+    genres: nextGenres,
+    excludedGenres: nextExcludedGenres,
+    platforms: parsed.platforms?.length ? parsed.platforms : base.platforms,
+    moods: nextMoods,
+    maxRuntime: parsed.maxRuntime ?? base.maxRuntime,
+    rankingMode: parsed.rankingMode ?? base.rankingMode,
+    yearRange: decadeMatch
+      ? [Number(decadeMatch[1]), Number(decadeMatch[1]) + 9]
+      : yearMatch ? [Number(yearMatch[1]), 2100] : base.yearRange,
+    languages: languages.length ? languages : base.languages,
+    peopleCount: peopleMatch ? Number(peopleMatch[1]) : base.peopleCount,
+    viewingContext: /\b(date night|with my (?:boyfriend|girlfriend|partner)|cita)\b/.test(normalized)
+      ? 'date-night'
+      : /\b(movie night|noche de cine)\b/.test(normalized) ? 'movie-night' : base.viewingContext,
+    lastUpdatedAt: now,
+  }
+}
+
 export function parseConstraintPrompt(prompt: string): RecommendationOptions {
   const normalized = normalize(prompt)
-  const genres = genreTerms.filter(([, pattern]) => pattern.test(normalized)).map(([genre]) => genre)
+  const genres = extractGenreSignals(normalized).included
   const platforms = platformTerms.filter(([, pattern]) => pattern.test(normalized)).map(([platform]) => platform)
   const moods = moodTerms.filter(([, pattern]) => pattern.test(normalized)).map(([mood]) => mood)
   const result: RecommendationOptions = { genres, platforms, moods }

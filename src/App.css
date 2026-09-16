@@ -260,9 +260,22 @@ main { width: min(1440px, 100%); padding: 0 24px 34px; background: var(--canvas)
 .topbar-meta .lab-toggle.active { color: #17362c; background: #c8eadf; border-color: #c8eadf; }
 
 .agent-console.primary-agent { margin-top: 22px; padding: 16px 18px; display: block; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: var(--shadow); }
+.conversation-thread { margin: -2px -2px 14px; padding: 10px; display: grid; gap: 7px; max-height: 180px; overflow-y: auto; border-radius: 10px; background: #f5f7f4; }
+.conversation-message { max-width: min(76%, 680px); display: grid; grid-template-columns: 22px 1fr; gap: 7px; align-items: start; }
+.conversation-message > span { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: var(--green); background: #dceee7; }
+.conversation-message p { margin: 0; padding: 7px 9px; border-radius: 3px 9px 9px 9px; color: var(--ink); background: #fff; font-size: 10px; line-height: 1.45; }
+.conversation-message.user { margin-left: auto; grid-template-columns: 1fr 22px; }
+.conversation-message.user > span { grid-column: 2; grid-row: 1; color: #9a3e25; background: #f9dfd6; }
+.conversation-message.user p { grid-column: 1; grid-row: 1; border-radius: 9px 3px 9px 9px; color: #fff; background: var(--orange); }
 .primary-agent .agent-command { min-height: 60px; padding: 0; grid-template-columns: 26px minmax(200px, .7fr) minmax(260px, 1.25fr) auto; border: 0; background: transparent; }
 .primary-agent .agent-command input { height: 42px; border-radius: 8px; background: #f6f7f4; }
 .primary-agent .agent-command > button { height: 42px; border-radius: 8px; background: var(--orange); }
+.primary-agent .agent-command > button:disabled { opacity: .45; cursor: default; }
+.primary-agent .agent-command .lucide-loader-circle { animation: catalog-spin .8s linear infinite; }
+.vibe-row { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.vibe-row > span { margin-right: 3px; color: var(--muted); font: 600 8px 'DM Mono'; text-transform: uppercase; }
+.vibe-row button { min-height: 27px; padding: 0 9px; border: 1px solid #d9cbc4; border-radius: 999px; color: #784c3e; background: #fff5f1; font-size: 8px; }
+.vibe-row .reset-conversation { width: 27px; padding: 0; display: grid; place-items: center; border-color: var(--line); color: var(--muted); background: transparent; }
 .agent-interpretation { margin-top: 10px; padding-top: 10px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; border-top: 1px solid var(--line); }
 .agent-interpretation > span { display: flex; align-items: center; gap: 5px; color: var(--green); font: 600 8px 'DM Mono'; text-transform: uppercase; }
 .agent-interpretation > div { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -367,6 +380,7 @@ footer { margin-top: 18px; min-height: 60px; padding: 0 4px; }
 	.primary-agent .agent-command input, .primary-agent .agent-command > button { grid-column: 1 / -1; }
 	.primary-agent .agent-command > button { justify-content: center; }
 	.agent-interpretation { grid-template-columns: 1fr; }
+	.conversation-message { max-width: 92%; }
 	.intro { margin-top: 14px; padding: 24px 20px; }
 	.intro h1 { font-size: 38px; }
 	.workflow-nav { margin-top: 10px; }
@@ -435,6 +449,10 @@ footer { margin-top: 18px; min-height: 60px; padding: 0 4px; }
 :root[data-theme='dark'] .onboarding li { color: #b6c2bc; }
 :root[data-theme='dark'] .intro-actions button + button { color: #e7ede9; border-color: #52605a; background: #29312d; }
 :root[data-theme='dark'] .agent-interpretation em { color: #b9e0d2; background: #263b33; }
+:root[data-theme='dark'] .conversation-thread { background: #1b211e; }
+:root[data-theme='dark'] .conversation-message p { background: #2a322e; }
+:root[data-theme='dark'] .conversation-message.user p { background: #a84429; }
+:root[data-theme='dark'] .vibe-row button { color: #ffc0aa; border-color: #684538; background: #33241f; }
 :root[data-theme='dark'] .agent-command input,
 :root[data-theme='dark'] .catalog-browser input,
 :root[data-theme='dark'] .catalog-browser button,

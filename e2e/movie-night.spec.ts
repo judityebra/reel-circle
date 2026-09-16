@@ -44,6 +44,18 @@ test('keeps the compact header on one row', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Open AI lab' })).toHaveCSS('width', '34px')
 })
 
+test('keeps earlier preferences during conversational refinement', async ({ page }) => {
+  await page.locator('#constraint-prompt').fill('I do not want horror')
+  await page.getByRole('button', { name: 'Apply', exact: true }).click()
+  await page.locator('#constraint-prompt').fill('Something darker, under 90 minutes')
+  await page.getByRole('button', { name: 'Apply', exact: true }).click()
+
+  await expect(page.locator('.conversation-message')).toHaveCount(4)
+  await expect(page.locator('.agent-interpretation')).toContainText('No Horror')
+  await expect(page.locator('.agent-interpretation')).toContainText('Twisty')
+  await expect(page.locator('.agent-interpretation')).toContainText('Under 90 min')
+})
+
 test('publishes Reel Circle social preview metadata', async ({ page }) => {
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/favicon.svg')
   await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', 'Reel Circle — Find tonight\'s film')

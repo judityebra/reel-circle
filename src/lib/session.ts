@@ -1,4 +1,5 @@
 import { openDB, type DBSchema } from 'idb'
+import type { ConversationPreferences } from './constraints'
 import type { AgentTraceEntry } from './decision-agent'
 import type { ExperimentRecord } from './experiments'
 import type { GraphNeuralResult } from './graph-neural'
@@ -11,6 +12,13 @@ export interface FeedbackEvent {
   movieId: string
   rejectedMovieId?: string
   action: TasteFeedback | 'comparison'
+  timestamp: number
+}
+
+export interface ConversationMessage {
+  id: string
+  role: 'user' | 'agent'
+  content: string
   timestamp: number
 }
 
@@ -28,6 +36,8 @@ export interface SessionSnapshot {
   graphNeuralResults?: Record<string, GraphNeuralResult>
   experiments?: ExperimentRecord[]
   agentTrace?: AgentTraceEntry[]
+  conversationPreferences?: ConversationPreferences
+  conversationMessages?: ConversationMessage[]
 }
 
 type SharedProfile = Pick<Profile, 'id' | 'name' | 'color' | 'preferredGenres' | 'tasteWeights' | 'featureWeights'>
