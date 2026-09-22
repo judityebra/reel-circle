@@ -13,6 +13,9 @@ flowchart LR
     Memory --> Parser
     Parser --> Agent[Server agent orchestrator]
     LLM[Optional OpenAI-compatible LLM] --> Parser
+    Agent --> Semantic[Local semantic vector index]
+    Catalog --> Semantic
+    Semantic --> Agent
     KG --> Baseline[Deterministic scorer]
     Feedback[Ratings and feedback] --> MLP[34-12-6-1 MLP]
     Feedback --> GCN[Two-layer GCN]
@@ -41,6 +44,8 @@ Conversation messages and preferences are stored only in IndexedDB and can be cl
 
 When `VITE_MOVIE_API_URL` is configured, turns are sent to `POST /api/agent`. The server attempts strict JSON-schema extraction with an OpenAI-compatible model, then runs deterministic filtering, ranking, and hard-constraint validation. If the model is absent or fails, the same endpoint falls back to the deterministic extractor. The response includes extraction mode, latency, and an observable tool trace.
 
+After hard filtering, the agent embeds each movie's synopsis, genres, keywords, cast, director, language, tone, and moods. A configured OpenAI-compatible embedding provider supplies neural vectors; otherwise the service builds 384-dimensional local vectors. Configured Qdrant collections receive bounded candidate upserts and candidate-scoped similarity searches. Without Qdrant, cosine search runs in memory. Semantic similarity contributes a bounded 28% of the final score, so vibe phrases can reorder valid candidates but cannot bypass explicit exclusions.
+
 Raw Letterboxd ratings and watched-film history are stripped by the client adapter. The server receives bounded movie candidates and privacy-safe learned preference weights.
 
 ## Agent loop
@@ -66,4 +71,4 @@ TMDB discovery is paginated through the browser in bounded 20-film server calls.
 
 ## Production service boundary
 
-The current deployment remains local-first but now has an optional hosted LLM extraction path behind `/api/agent`. It does not yet claim LangGraph or vector-search capabilities. The next backend phase should add embedding generation and vector retrieval behind this boundary. A production implementation can add LangGraph with a durable checkpointer and Qdrant or pgvector without moving TMDB credentials or raw user history into the browser.
+The deployment remains local-first and includes optional hosted LLM extraction, OpenAI-compatible embeddings, and Qdrant persistence behind `/api/agent`. Each capability falls back independently: model extraction to deterministic parsing, embeddings to local vectors, and Qdrant to in-memory cosine search. The next backend phase should add durable conversation checkpoints and incremental background indexing so unchanged movies are not re-embedded on each request.

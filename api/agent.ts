@@ -1,5 +1,6 @@
 import { createConversationPreferences, updateConversationPreferences, type ConversationPreferences } from '../src/lib/constraints.js'
 import { explainPreferenceMatch, scoreCandidates, type Movie, type Profile } from '../src/lib/recommendation.js'
+import { retrieveSemantically } from './semantic-service.js'
 
 interface ServerlessRequest {
   method?: string
@@ -21,7 +22,7 @@ interface AgentRequest {
 }
 
 interface AgentStep {
-  tool: 'extract_preferences' | 'filter_candidates' | 'rank_candidates' | 'validate_results'
+  tool: 'extract_preferences' | 'filter_candidates' | 'semantic_retrieval' | 'rank_candidates' | 'validate_results'
   status: 'completed' | 'skipped'
   durationMs: number
   observation: string
@@ -179,11 +180,19 @@ export default async function handler(request: ServerlessRequest, response: Serv
   const ranked = scoreCandidates(input.candidates ?? [], input.profiles ?? [], preferences)
   trace.push({ tool: 'filter_candidates', status: input.candidates?.length ? 'completed' : 'skipped', durationMs: Date.now() - filterStartedAt, observation: `${ranked.length}/${input.candidates?.length ?? 0} candidates satisfy hard constraints` })
 
-  const recommendations = ranked.slice(0, input.limit).map(({ movie, score, reasons }) => ({
+  const semanticStartedAt = Date.now()
+  const semanticResult = await retrieveSemantically(input.message, ranked)
+  const semanticRanked = semanticResult.recommendations
+  const semanticMatches = semanticRanked.filter(({ semanticScore }) => semanticScore > 0).length
+  trace.push({ tool: 'semantic_retrieval', status: ranked.length ? 'completed' : 'skipped', durationMs: Date.now() - semanticStartedAt, observation: `${semanticResult.retrievalMode} · ${semanticResult.embeddingModel} · ${semanticResult.dimensions}d · ${semanticMatches}/${ranked.length} matches` })
+
+  const recommendations = semanticRanked.slice(0, input.limit).map(({ movie, score, reasons, semanticScore, semanticTerms }) => ({
     movie,
     score,
     matchedPreferences: reasons,
-    explanation: explainPreferenceMatch(movie, preferences),
+    explanation: `${explainPreferenceMatch(movie, preferences)}${semanticTerms.length ? ` Semantic signals: ${semanticTerms.slice(0, 3).join(', ')}.` : ''}`,
+    semanticScore,
+    semanticTerms,
   }))
   trace.push({ tool: 'rank_candidates', status: recommendations.length ? 'completed' : 'skipped', durationMs: 0, observation: `${recommendations.length} recommendations returned` })
 
@@ -198,6 +207,19 @@ export default async function handler(request: ServerlessRequest, response: Serv
     preferences,
     recommendations,
     clarificationQuestion: modelExtraction?.clarificationQuestion,
-    meta: { extractionMode, modelStatus, modelError, durationMs: Date.now() - startedAt, trace },
+    meta: {
+      extractionMode,
+      modelStatus,
+      modelError,
+      semantic: {
+        retrievalMode: semanticResult.retrievalMode,
+        embeddingMode: semanticResult.embeddingMode,
+        embeddingModel: semanticResult.embeddingModel,
+        dimensions: semanticResult.dimensions,
+        fallbackReason: semanticResult.fallbackReason,
+      },
+      durationMs: Date.now() - startedAt,
+      trace,
+    },
   })
 }

@@ -2,7 +2,7 @@ import type { ConversationPreferences } from './constraints'
 import type { Movie, Profile } from './recommendation'
 
 export interface AgentApiStep {
-  tool: 'extract_preferences' | 'filter_candidates' | 'rank_candidates' | 'validate_results'
+  tool: 'extract_preferences' | 'filter_candidates' | 'semantic_retrieval' | 'rank_candidates' | 'validate_results'
   status: 'completed' | 'skipped'
   durationMs: number
   observation: string
@@ -15,12 +15,21 @@ export interface AgentApiResponse {
     score: number
     matchedPreferences: string[]
     explanation: string
+    semanticScore: number
+    semanticTerms: string[]
   }>
   clarificationQuestion?: string
   meta: {
     extractionMode: 'model' | 'deterministic'
     modelStatus: 'not-configured' | 'failed' | 'succeeded'
     modelError?: string
+    semantic: {
+      retrievalMode: 'qdrant' | 'embedding-memory' | 'local'
+      embeddingMode: 'provider' | 'local'
+      embeddingModel: string
+      dimensions: number
+      fallbackReason?: 'embedding-failed' | 'qdrant-failed'
+    }
     durationMs: number
     trace: AgentApiStep[]
   }

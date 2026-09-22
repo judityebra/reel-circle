@@ -71,6 +71,7 @@ function App() {
   const [conversationPreferences, setConversationPreferences] = useState<ConversationPreferences>(() => createConversationPreferences())
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([])
   const [conversationStatus, setConversationStatus] = useState<'idle' | 'thinking'>('idle')
+  const [agentExplanations, setAgentExplanations] = useState<Record<string, string>>({})
   const [selectedId, setSelectedId] = useState('')
   const [activeProfileId, setActiveProfileId] = useState('')
   const [feedbackNotice, setFeedbackNotice] = useState('')
@@ -637,6 +638,7 @@ function App() {
         const result = await requestAgentTurn(apiUrl, prompt, conversationPreferences, movieCatalog, profiles)
         next = result.preferences
         selectedMovieId = result.recommendations[0]?.movie.id
+        setAgentExplanations(Object.fromEntries(result.recommendations.map(({ movie, explanation }) => [movie.id, explanation])))
         reply = result.clarificationQuestion ?? (result.recommendations.length
           ? `I used ${result.meta.trace.length} agent steps to find ${result.recommendations.length} strong matches. ${result.recommendations[0].explanation}`
           : 'Nothing fits every hard constraint yet. Tell me which detail matters least and I will widen that boundary.')
@@ -677,6 +679,7 @@ function App() {
   const resetConversation = () => {
     setConversationPreferences(createConversationPreferences())
     setConversationMessages([])
+    setAgentExplanations({})
     setPromptInterpretation(null)
     setActiveGenres([])
     setActivePlatforms([])
@@ -923,7 +926,7 @@ function App() {
           <div className="panel-heading"><div><p className="eyebrow"><Sparkles size={14} /> 04 · {t('decide')}</p><h2>{t('tonightShortlist')}</h2></div><span>{recommendations.length} {t('matches')}</span></div>
           {selected ? <div className="hero-pick">
             <div className="poster-wrap"><img src={selected.movie.poster} alt={`${selected.movie.title} poster`} onError={usePosterFallback} /><span>{selected.score}%</span></div>
-            <div className="pick-copy"><p className="rank">{t('bestBet')}</p><h3>{selected.movie.title}</h3><p className="metadata">{selected.movie.year} · {selected.movie.runtime} min · {displayValue(locale, selected.movie.tone ?? '')}</p><div className="availability">{selected.movie.platforms.map((platform) => <span key={platform}>{platform}</span>)}</div><p className="reason">{conversationMessages.length ? explainPreferenceMatch(selected.movie, { ...conversationPreferences, maxRuntime, genres: activeGenres, platforms: activePlatforms, moods: activeMoods }) : `${localizeReason(locale, selected.reasons[0])}. ${localizeReason(locale, selected.reasons[1])}.`}</p>
+            <div className="pick-copy"><p className="rank">{t('bestBet')}</p><h3>{selected.movie.title}</h3><p className="metadata">{selected.movie.year} · {selected.movie.runtime} min · {displayValue(locale, selected.movie.tone ?? '')}</p><div className="availability">{selected.movie.platforms.map((platform) => <span key={platform}>{platform}</span>)}</div><p className="reason">{agentExplanations[selected.movie.id] ?? (conversationMessages.length ? explainPreferenceMatch(selected.movie, { ...conversationPreferences, maxRuntime, genres: activeGenres, platforms: activePlatforms, moods: activeMoods }) : `${localizeReason(locale, selected.reasons[0])}. ${localizeReason(locale, selected.reasons[1])}.`)}</p>
               <div className="profile-scores">{selected.matchByProfile.map((match) => { const profile = profiles.find(({ id }) => id === match.profileId); return <span key={match.profileId} style={{ '--person': profile?.color } as CSSProperties}><i />{profile?.name} {match.score}%</span> })}</div>
             </div>
           </div> : <div className="empty-state"><Film size={30} /><strong>{t('noMatches')}</strong><span>{t('widenFilters')}</span></div>}

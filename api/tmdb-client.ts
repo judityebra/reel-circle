@@ -22,7 +22,7 @@ export function tmdbUrl(path: string, authentication: TmdbAuthentication): strin
 }
 
 export async function fetchEnrichedMovie(id: number, authentication: TmdbAuthentication) {
-  const response = await fetch(tmdbUrl(`/movie/${id}?append_to_response=credits%2Cwatch%2Fproviders`, authentication), { headers: authentication.headers })
+  const response = await fetch(tmdbUrl(`/movie/${id}?append_to_response=credits%2Cwatch%2Fproviders%2Ckeywords%2Cvideos`, authentication), { headers: authentication.headers })
   if (!response.ok) return null
   const details = await response.json() as TmdbMovieDetails & {
     'watch/providers'?: { results?: TmdbMovieDetails['providers'] }

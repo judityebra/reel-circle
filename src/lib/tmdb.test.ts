@@ -10,9 +10,13 @@ describe('normalizeTmdbMovie', () => {
       runtime: 95,
       vote_average: 8.2,
       poster_path: '/poster.jpg',
+      backdrop_path: '/backdrop.jpg',
+      overview: 'A richly textured example.',
       genres: [{ name: 'Drama' }],
       original_language: 'es',
-      credits: { crew: [{ job: 'Director', name: 'Director Name' }] },
+      credits: { crew: [{ job: 'Director', name: 'Director Name' }], cast: [{ name: 'Second Actor', order: 2 }, { name: 'Lead Actor', order: 0 }] },
+      keywords: { keywords: [{ name: 'complicated women' }, { name: 'beautiful cinematography' }] },
+      videos: { results: [{ key: 'trailer-key', site: 'YouTube', type: 'Trailer', official: true }] },
       providers: { ES: { flatrate: [{ provider_name: 'Filmin' }, { provider_name: 'Amazon Prime Video' }], ads: [{ provider_name: 'Filmin' }, { provider_name: 'Amazon Prime Video with Ads' }] } },
     })
 
@@ -24,6 +28,11 @@ describe('normalizeTmdbMovie', () => {
       platforms: ['Filmin', 'Prime Video'],
       director: 'Director Name',
       language: 'Spanish',
+      overview: 'A richly textured example.',
+      keywords: ['complicated women', 'beautiful cinematography'],
+      cast: ['Lead Actor', 'Second Actor'],
+      backdrop: 'https://image.tmdb.org/t/p/w1280/backdrop.jpg',
+      trailerUrl: 'https://www.youtube.com/watch?v=trailer-key',
     })
   })
 })

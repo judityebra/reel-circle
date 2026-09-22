@@ -56,6 +56,34 @@ test('keeps earlier preferences during conversational refinement', async ({ page
   await expect(page.locator('.agent-interpretation')).toContainText('Under 90 min')
 })
 
+test('shows server semantic evidence on the selected recommendation', async ({ page }) => {
+  await page.route('**/api/agent', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        preferences: { genres: ['Mystery'], excludedGenres: [], platforms: [], moods: ['Twisty'], lastUpdatedAt: Date.now() },
+        recommendations: [{
+          movie: { id: 'coherence-2013', title: 'Coherence', year: 2013, runtime: 89, genres: ['Mystery', 'Sci-Fi'], platforms: ['Filmin'], rating: 3.8 },
+          score: 88,
+          matchedPreferences: ['Mystery'],
+          explanation: 'Coherence fits the mystery request. Semantic signals: witty, mysterious, playful.',
+          semanticScore: 82,
+          semanticTerms: ['witty', 'mysterious', 'playful'],
+        }],
+        meta: {
+          extractionMode: 'model', modelStatus: 'succeeded', durationMs: 120,
+          trace: ['extract_preferences', 'filter_candidates', 'semantic_retrieval', 'rank_candidates', 'validate_results'].map((tool) => ({ tool, status: 'completed', durationMs: 1, observation: 'ok' })),
+        },
+      }),
+    })
+  })
+
+  await page.locator('#constraint-prompt').fill('Witty and mysterious')
+  await page.getByRole('button', { name: 'Apply', exact: true }).click()
+
+  await expect(page.locator('.hero-pick .reason')).toContainText('Semantic signals: witty, mysterious, playful')
+})
+
 test('publishes Reel Circle social preview metadata', async ({ page }) => {
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/favicon.svg')
   await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', 'Reel Circle — Find tonight\'s film')

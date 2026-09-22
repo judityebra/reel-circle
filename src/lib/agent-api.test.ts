@@ -44,9 +44,11 @@ describe('agent API', () => {
       recommendations: [{ movie: { id: 'mystery' } }],
       meta: {
         extractionMode: 'deterministic',
+        semantic: { retrievalMode: 'local', embeddingMode: 'local', embeddingModel: 'local-hash-v1', dimensions: 384 },
         trace: [
           { tool: 'extract_preferences', status: 'completed' },
           { tool: 'filter_candidates', status: 'completed' },
+          { tool: 'semantic_retrieval', status: 'completed' },
           { tool: 'rank_candidates', status: 'completed' },
           { tool: 'validate_results', status: 'completed', observation: '0 hard-constraint violations' },
         ],
@@ -90,6 +92,7 @@ describe('agent API', () => {
     expect(JSON.parse(modelFetch.mock.calls[1][1].body).response_format).toEqual({ type: 'json_object' })
     expect(payload.meta?.extractionMode).toBe('model')
     expect(payload.recommendations?.map(({ movie }) => movie.id)).toEqual(['mystery'])
+    expect(payload.recommendations?.[0]).toMatchObject({ semanticScore: expect.any(Number), semanticTerms: expect.any(Array) })
   })
 
   it('strips raw ratings and watch history from client requests', async () => {

@@ -20,6 +20,11 @@ export interface Movie extends FilmRef {
   director?: string
   language?: string
   moods?: string[]
+  overview?: string
+  keywords?: string[]
+  cast?: string[]
+  backdrop?: string
+  trailerUrl?: string
 }
 
 export interface Profile {

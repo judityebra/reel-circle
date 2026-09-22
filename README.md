@@ -21,6 +21,7 @@ The default experience is a focused decision dashboard. The optional AI lab expo
 - **Agent safety:** an eight-step bounded plan-act-observe loop with typed tools, persistent traces, and approval gates.
 - **Conversation memory:** typed session preferences preserve exclusions and refinements without storing personal data on a server.
 - **Server agent:** optional OpenAI-compatible structured extraction with deterministic fallback, candidate tools, validation, latency, and trace metadata.
+- **Semantic retrieval:** rich TMDB documents, pluggable embeddings, and optional Qdrant search rerank valid candidates for vibe-based requests.
 - **Quality:** 63 unit tests, an end-to-end movie-night workflow, ESLint, production builds, and dependency auditing in CI.
 
 ## Project documentation
@@ -36,6 +37,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system boundaries, data flow, privacy
 - Vibe shortcuts for cozy, romantic, thoughtful, funny, and dark recommendations.
 - Structured runtime, genre, negative genre, mood, provider, language, release-period, group-size, and viewing-context extraction.
 - Recommendation explanations grounded in the active conversation state.
+- TMDB synopsis, keyword, cast, backdrop, and trailer enrichment for semantic retrieval and richer results.
 - Balanced, average, least-misery, and Nash group-ranking strategies.
 - Active-learning comparisons and direct skip, pick, and post-watch feedback.
 - Deep graph signals for directors, languages, moods, and decades.
@@ -122,7 +124,7 @@ Shared room links are asynchronous snapshots, not real-time collaboration. They 
 
 ## Roadmap boundary
 
-The repository currently implements a typed server agent with optional hosted LLM extraction, deterministic fallback, local neural ranking, TMDB tools, stateful conversation memory, evaluation, and observable traces. LangGraph persistence and embedding-backed vector retrieval remain planned backend phases. Credentials stay server-side.
+The repository currently implements a typed server agent with optional hosted LLM extraction, OpenAI-compatible embeddings, Qdrant retrieval, deterministic fallbacks, local neural ranking, TMDB tools, stateful conversation memory, evaluation, and observable traces. LangGraph persistence and incremental background indexing remain planned backend phases. Credentials stay server-side.
 
 The Experiment Lab provides local backup and delete-all-data controls. Delete removes profiles, ratings, model outputs, traces, and cached catalog data. TMDB metadata and images require TMDB attribution; the application footer includes the required non-endorsement notice.
 

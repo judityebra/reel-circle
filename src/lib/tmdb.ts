@@ -11,9 +11,13 @@ export interface TmdbMovieDetails {
   runtime?: number
   vote_average?: number
   poster_path?: string | null
+  backdrop_path?: string | null
+  overview?: string
   genres?: Array<{ name: string }>
   original_language?: string
-  credits?: { crew?: Array<{ job: string; name: string }> }
+  credits?: { crew?: Array<{ job: string; name: string }>; cast?: Array<{ name: string; order?: number }> }
+  keywords?: { keywords?: Array<{ name: string }> }
+  videos?: { results?: Array<{ key: string; site: string; type: string; official?: boolean }> }
   providers?: { ES?: { flatrate?: Provider[]; free?: Provider[]; ads?: Provider[] } }
 }
 
@@ -56,6 +60,8 @@ export function normalizeTmdbMovie(details: TmdbMovieDetails): Movie {
     ...(providerRegion?.free ?? []),
     ...(providerRegion?.ads ?? []),
   ].map(({ provider_name }) => canonicalProvider(provider_name)))]
+  const trailer = details.videos?.results?.find(({ site, type, official }) => site === 'YouTube' && type === 'Trailer' && official)
+    ?? details.videos?.results?.find(({ site, type }) => site === 'YouTube' && type === 'Trailer')
 
   return {
     id: `tmdb-${details.id}`,
@@ -67,6 +73,11 @@ export function normalizeTmdbMovie(details: TmdbMovieDetails): Movie {
     platforms,
     rating: Number(((details.vote_average ?? 0) / 2).toFixed(1)),
     poster: details.poster_path ? `https://image.tmdb.org/t/p/w500${details.poster_path}` : undefined,
+    backdrop: details.backdrop_path ? `https://image.tmdb.org/t/p/w1280${details.backdrop_path}` : undefined,
+    overview: details.overview?.trim() || undefined,
+    keywords: details.keywords?.keywords?.map(({ name }) => name).slice(0, 20),
+    cast: details.credits?.cast?.sort((left, right) => (left.order ?? 999) - (right.order ?? 999)).slice(0, 8).map(({ name }) => name),
+    trailerUrl: trailer ? `https://www.youtube.com/watch?v=${trailer.key}` : undefined,
     director: details.credits?.crew?.find(({ job }) => job === 'Director')?.name,
     language: languages[details.original_language ?? ''] ?? details.original_language?.toUpperCase(),
     moods: inferMoods(genres),

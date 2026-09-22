@@ -26,8 +26,9 @@ The browser limits candidates to 250 and profiles to 12. Profiles contain prefer
 
 1. `extract_preferences`: request strict JSON-schema output from the configured model, or use deterministic extraction.
 2. `filter_candidates`: enforce watched, genre exclusion, runtime, release period, language, platform, genre, and mood constraints.
-3. `rank_candidates`: apply Reel Circle's explainable group scorer.
-4. `validate_results`: verify excluded genres and runtime limits before returning recommendations.
+3. `semantic_retrieval`: compare the request with rich movie documents using provider embeddings and Qdrant when configured, or local vectors and in-memory cosine search.
+4. `rank_candidates`: blend semantic similarity with Reel Circle's explainable group scorer.
+5. `validate_results`: verify excluded genres and runtime limits before returning recommendations.
 
 ## Response
 
@@ -65,6 +66,8 @@ The browser limits candidates to 250 and profiles to 12. Profiles contain prefer
 - `OPENAI_MODEL`: model name; defaults to `gpt-4.1-mini`.
 - `OPENAI_BASE_URL`: optional OpenAI-compatible API base URL.
 - `VITE_MOVIE_API_URL`: frontend API base, normally `/api` on Vercel.
+- `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`, `EMBEDDING_API_KEY`: optional OpenAI-compatible embedding provider.
+- `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_COLLECTION`: optional persistent vector search.
 
 Groq example:
 
@@ -80,4 +83,4 @@ When a request fails, `modelError` contains only a sanitized category such as `h
 
 ## Current boundary
 
-The endpoint ranks the bounded catalog supplied by the browser. Embedding generation, semantic vector retrieval, durable server memory, and LangGraph orchestration are separate future phases and are not claimed by this contract.
+The endpoint semantically reranks the bounded catalog supplied by the browser. Without external configuration, its 384-dimensional local vectors use deterministic feature hashing and are not claimed as neural embeddings. With an embedding provider and Qdrant configured, response metadata reports `embeddingMode: "provider"` and `retrievalMode: "qdrant"`. Durable server memory, incremental indexing, and LangGraph orchestration remain future phases.
