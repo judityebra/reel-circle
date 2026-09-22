@@ -21,7 +21,7 @@ The default experience is a focused decision dashboard. The optional AI lab expo
 - **Agent safety:** an eight-step bounded plan-act-observe loop with typed tools, persistent traces, and approval gates.
 - **Conversation memory:** typed session preferences preserve exclusions and refinements without storing personal data on a server.
 - **Server agent:** optional OpenAI-compatible structured extraction with deterministic fallback, candidate tools, validation, latency, and trace metadata.
-- **Semantic retrieval:** rich TMDB documents, pluggable embeddings, and optional Qdrant search rerank valid candidates for vibe-based requests.
+- **Semantic retrieval:** rich TMDB documents, native Gemini or OpenAI-compatible embeddings, and optional Qdrant search rerank valid candidates for vibe-based requests.
 - **Quality:** 63 unit tests, an end-to-end movie-night workflow, ESLint, production builds, and dependency auditing in CI.
 
 ## Project documentation

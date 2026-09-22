@@ -47,20 +47,31 @@ export async function searchQdrant(
   })
   if (!upserted.ok) throw new Error(`Qdrant upsert failed: ${upserted.status}`)
 
-  const searched = await fetcher(`${collectionUrl}/points/search`, {
+  const queryBody = {
+    query: queryVector,
+    filter: { must: [{ has_id: candidates.map(({ movieId }) => pointId(movieId)) }] },
+    limit: Math.max(1, Math.min(limit, candidates.length)),
+    with_payload: true,
+    with_vector: false,
+  }
+  let searched = await fetcher(`${collectionUrl}/points/query`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      vector: queryVector,
-      filter: { must: [{ key: 'movieId', match: { any: candidates.map(({ movieId }) => movieId) } }] },
-      limit: Math.max(1, Math.min(limit, candidates.length)),
-      with_payload: true,
-      with_vector: false,
-    }),
+    body: JSON.stringify(queryBody),
   })
+  let legacy = false
+  if (searched.status === 404) {
+    legacy = true
+    searched = await fetcher(`${collectionUrl}/points/search`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ...queryBody, vector: queryVector, query: undefined }),
+    })
+  }
   if (!searched.ok) throw new Error(`Qdrant search failed: ${searched.status}`)
-  const payload = await searched.json() as { result?: Array<{ score?: number; payload?: { movieId?: string } }> }
-  return (payload.result ?? []).flatMap(({ score, payload: itemPayload }) => itemPayload?.movieId
+  const payload = await searched.json() as { result?: { points?: Array<{ score?: number; payload?: { movieId?: string } }> } | Array<{ score?: number; payload?: { movieId?: string } }> }
+  const results = legacy ? payload.result : !Array.isArray(payload.result) ? payload.result?.points : []
+  return (Array.isArray(results) ? results : []).flatMap(({ score, payload: itemPayload }) => itemPayload?.movieId
     ? [{ movieId: itemPayload.movieId, score: Math.max(0, Math.min(1, score ?? 0)), matchedTerms: [] }]
     : [])
 }

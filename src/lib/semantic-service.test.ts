@@ -74,7 +74,7 @@ describe('semantic service', () => {
     const qdrantResponses = [
       { ok: true, status: 200, json: async () => ({}) },
       { ok: true, status: 200, json: async () => ({}) },
-      { ok: true, status: 200, json: async () => ({ result: [{ score: 0.95, payload: { movieId: 'paris' } }, { score: 0.05, payload: { movieId: 'space' } }] }) },
+      { ok: true, status: 200, json: async () => ({ result: { points: [{ score: 0.95, payload: { movieId: 'paris' } }, { score: 0.05, payload: { movieId: 'space' } }] } }) },
     ]
     const qdrantFetcher = async () => qdrantResponses.shift()!
 
