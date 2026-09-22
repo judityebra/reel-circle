@@ -56,6 +56,35 @@ test('keeps earlier preferences during conversational refinement', async ({ page
   await expect(page.locator('.agent-interpretation')).toContainText('Under 90 min')
 })
 
+test('runs a working Maya and Leo example without roadmap numbering', async ({ page }) => {
+  await expect(page.locator('.onboarding')).toContainText('Maya')
+  await expect(page.locator('.onboarding')).toContainText('Leo')
+  await expect(page.locator('.onboarding')).toContainText('English sci-fi · under 100 min')
+
+  await page.getByRole('button', { name: 'Run this demo' }).click({ force: true })
+
+  await expect(page.locator('.conversation-message')).toHaveCount(2)
+  await expect(page.locator('.conversation-message.user')).toContainText('English sci-fi')
+  await expect(page.locator('.people-strip')).toContainText('Maya')
+  await expect(page.locator('.people-strip')).toContainText('Leo')
+  await expect(page.locator('.agent-interpretation')).toContainText('Sci-Fi')
+  await expect(page.locator('.agent-interpretation')).toContainText('Under 100 min')
+  await expect(page.locator('.agent-interpretation')).not.toContainText('0 matches now')
+  await expect(page.locator('.hero-pick')).toBeVisible()
+  await expect(page.locator('.graph-panel')).toBeVisible()
+  await expect(page.locator('.graph-panel .eyebrow')).not.toContainText('03')
+  await expect(page.locator('.results-panel .eyebrow')).not.toContainText('04')
+  expect(await page.locator('.results-panel').evaluate((results) => results.getBoundingClientRect().left)).toBeLessThan(
+    await page.locator('.graph-panel').evaluate((graph) => graph.getBoundingClientRect().left),
+  )
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => document.documentElement.clientWidth))
+  expect(await page.locator('.results-panel').evaluate((results) => results.getBoundingClientRect().top)).toBeLessThan(
+    await page.locator('.graph-panel').evaluate((graph) => graph.getBoundingClientRect().top),
+  )
+})
+
 test('shows server semantic evidence on the selected recommendation', async ({ page }) => {
   await page.route('**/api/agent', async (route) => {
     await route.fulfill({

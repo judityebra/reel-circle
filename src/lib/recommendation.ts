@@ -220,12 +220,8 @@ export function scoreCandidates(
         requestedPlatforms.length === 0 ||
         requestedPlatforms.some((platform) => movie.platforms.includes(platform)),
     )
-    .filter(
-      (movie) =>
-        requestedMoods.length === 0 ||
-        requestedMoods.some((mood) => movie.moods?.includes(mood)),
-    )
     .map((movie) => {
+      const moodMatches = requestedMoods.filter((mood) => movie.moods?.includes(mood)).length
       const matchByProfile = profiles.map((profile) => {
         const genreMatches = movie.genres.filter((genre) =>
           profile.preferredGenres.includes(genre),
@@ -238,7 +234,7 @@ export function scoreCandidates(
           (total, feature) => total + (profile.featureWeights?.[feature] ?? 0),
           0,
         )
-        const explainableScore = clamp(movie.rating * 14 + genreMatches * 14 + learnedPreference * 16 + featurePreference * 6 + (movie.runtime <= 100 ? 8 : 0))
+        const explainableScore = clamp(movie.rating * 14 + genreMatches * 14 + moodMatches * 20 + learnedPreference * 16 + featurePreference * 6 + (movie.runtime <= 100 ? 8 : 0))
         const neuralScore = options.neuralScores?.[profile.id]?.[movie.id]
         const blend = Math.max(0, Math.min(1, options.neuralBlend ?? 0))
         const score = neuralScore === undefined ? explainableScore : clamp(explainableScore * (1 - blend) + neuralScore * blend)
@@ -250,6 +246,7 @@ export function scoreCandidates(
         profiles.every((profile) => profile.preferredGenres.includes(genre)),
       )
       const reasons = [
+        ...(moodMatches > 0 ? [`Mood match: ${requestedMoods.filter((mood) => movie.moods?.includes(mood)).join(', ')}`] : []),
         sharedGenres.length > 0
           ? `Shared taste: ${sharedGenres.join(', ')}`
           : `${movie.genres[0]} bridges this group`,

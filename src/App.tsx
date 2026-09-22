@@ -3,7 +3,7 @@ import { Background, Controls, ReactFlow, useNodesState, type Edge, type Node } 
 import '@xyflow/react/dist/style.css'
 import { Activity, BarChart3, Bot, BrainCircuit, Check, CheckCircle2, ChevronRight, Clock3, Copy, Cpu, Database, Download, Film, FlaskConical, GitCompareArrows, Heart, Layers3, LoaderCircle, MessageSquareText, MonitorPlay, Moon, Network, Play, Plus, Route, RotateCcw, Search, Share2, ShieldCheck, Shuffle, Sparkles, Sun, Target, Thermometer, ThumbsDown, Trash2, Upload, Users, X } from 'lucide-react'
 import { catalog as demoCatalog, demoProfiles, profileColors } from './data'
-import { requestAgentTurn } from './lib/agent-api'
+import { requestAgentTurn, type AgentApiResponse } from './lib/agent-api'
 import { evaluateAgentTrace, scoreAgentRun } from './lib/agent-evaluation'
 import { createConversationPreferences, describeConstraints, parseConstraintPrompt, updateConversationPreferences, type ConversationPreferences } from './lib/constraints'
 import { runDecisionAgent, type AgentTraceEntry } from './lib/decision-agent'
@@ -72,6 +72,7 @@ function App() {
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([])
   const [conversationStatus, setConversationStatus] = useState<'idle' | 'thinking'>('idle')
   const [agentExplanations, setAgentExplanations] = useState<Record<string, string>>({})
+  const [latestAgentMeta, setLatestAgentMeta] = useState<AgentApiResponse['meta'] | null>(null)
   const [selectedId, setSelectedId] = useState('')
   const [activeProfileId, setActiveProfileId] = useState('')
   const [feedbackNotice, setFeedbackNotice] = useState('')
@@ -625,18 +626,23 @@ function App() {
     setAgentStatus('idle')
   }
 
-  const applyConstraintPrompt = async (suggestedPrompt?: string) => {
+  const applyConstraintPrompt = async (
+    suggestedPrompt?: string,
+    turnProfiles = profiles,
+    startingPreferences = conversationPreferences,
+  ) => {
     const prompt = suggestedPrompt ?? constraintPrompt
     if (!prompt.trim() || conversationStatus === 'thinking') return
     setConversationStatus('thinking')
     const apiUrl = import.meta.env.VITE_MOVIE_API_URL as string | undefined
-    let next = updateConversationPreferences(conversationPreferences, prompt)
+    let next = updateConversationPreferences(startingPreferences, prompt)
     let reply: string | undefined
     let selectedMovieId: string | undefined
     if (apiUrl) {
       try {
-        const result = await requestAgentTurn(apiUrl, prompt, conversationPreferences, movieCatalog, profiles)
+        const result = await requestAgentTurn(apiUrl, prompt, startingPreferences, movieCatalog, turnProfiles)
         next = result.preferences
+        setLatestAgentMeta(result.meta)
         selectedMovieId = result.recommendations[0]?.movie.id
         setAgentExplanations(Object.fromEntries(result.recommendations.map(({ movie, explanation }) => [movie.id, explanation])))
         reply = result.clarificationQuestion ?? (result.recommendations.length
@@ -644,6 +650,7 @@ function App() {
           : 'Nothing fits every hard constraint yet. Tell me which detail matters least and I will widen that boundary.')
         setFeedbackNotice(`${result.meta.extractionMode === 'model' ? 'LLM' : 'Deterministic'} agent · ${result.meta.durationMs} ms · ${result.meta.trace.length} steps`)
       } catch {
+        setLatestAgentMeta(null)
         setFeedbackNotice('Agent API unavailable; local preference engine used')
       }
     }
@@ -660,7 +667,7 @@ function App() {
       ...(next.yearRange ? [`${next.yearRange[0]}-${next.yearRange[1]}`] : []),
     ]
     setPromptInterpretation([...new Set(descriptions.filter((value) => value !== 'Any movie'))])
-    const nextCount = scoreCandidates(movieCatalog, profiles, next).length
+    const nextCount = scoreCandidates(movieCatalog, turnProfiles, next).length
     reply ??= nextCount
       ? `I found ${nextCount} matches and kept your earlier preferences in the mix. You can refine these without starting over.`
       : 'Nothing fits every hard constraint yet. Tell me which detail matters least and I will widen that boundary.'
@@ -676,10 +683,29 @@ function App() {
     setConversationStatus('idle')
   }
 
+  const runMayaLeoDemo = async () => {
+    const cleanPreferences = createConversationPreferences()
+    setProfiles(demoProfiles)
+    setActiveProfileId('maya')
+    setConversationPreferences(cleanPreferences)
+    setConversationMessages([])
+    setAgentExplanations({})
+    setLatestAgentMeta(null)
+    setFeedbackEvents([])
+    setActiveGenres([])
+    setActivePlatforms([])
+    setActiveMoods([])
+    setMaxRuntime(undefined)
+    setRankingMode('balanced')
+    await applyConstraintPrompt('English sci-fi, playful or twisty, under 100 minutes, something Maya and Leo can both enjoy', demoProfiles, cleanPreferences)
+    document.querySelector('#decision')?.scrollIntoView({ behavior: 'smooth' })
+  }
+
   const resetConversation = () => {
     setConversationPreferences(createConversationPreferences())
     setConversationMessages([])
     setAgentExplanations({})
+    setLatestAgentMeta(null)
     setPromptInterpretation(null)
     setActiveGenres([])
     setActivePlatforms([])
@@ -838,6 +864,10 @@ function App() {
     })
   }
 
+  const conversationalObservation = (tool: AgentApiResponse['meta']['trace'][number]['tool']) =>
+    latestAgentMeta?.trace.find((step) => step.tool === tool)?.observation
+  const latestUserRequest = [...conversationMessages].reverse().find(({ role }) => role === 'user')?.content
+
   return (
     <main>
       <header className="topbar">
@@ -846,6 +876,7 @@ function App() {
       </header>
 
       <section className="agent-console primary-agent" aria-label="Conversational movie agent">
+        <div className="simple-guide"><strong>{locale === 'es' ? 'Dilo con tus palabras' : 'Say it naturally'}</strong><span>{locale === 'es' ? 'El agente busca, compara y explica. Después puedes pedir cambios.' : 'The agent searches, compares, and explains. Then you can ask for changes.'}</span></div>
         {conversationMessages.length > 0 && <div className="conversation-thread" aria-live="polite">
           {conversationMessages.slice(-4).map((message) => <div className={`conversation-message ${message.role}`} key={message.id}><span>{message.role === 'agent' ? <Sparkles size={13} /> : <Users size={13} />}</span><p>{message.content}</p></div>)}
         </div>}
@@ -856,7 +887,7 @@ function App() {
           <button type="button" onClick={() => void applyConstraintPrompt()} disabled={!constraintPrompt.trim() || conversationStatus === 'thinking'}>{conversationStatus === 'thinking' ? <LoaderCircle size={15} /> : <Sparkles size={15} />} {conversationStatus === 'thinking' ? 'Thinking' : t('apply')}</button>
         </div>
         <div className="vibe-row"><span>Tonight's vibe</span>{vibePrompts.map(([label, prompt]) => <button type="button" key={label} onClick={() => void applyConstraintPrompt(prompt)} disabled={conversationStatus === 'thinking'}>{label}</button>)}<button className="reset-conversation" type="button" onClick={resetConversation} title="Reset conversation" aria-label="Reset conversation"><RotateCcw size={13} /></button></div>
-        {promptInterpretation && <div className="agent-interpretation"><span><CheckCircle2 size={14} /> {t('understood')}</span><div>{promptInterpretation.map((constraint) => <em key={constraint}>{displayValue(locale, constraint)}</em>)}</div><small>{recommendations.length} {t('matchesNow')}</small></div>}
+        {promptInterpretation && <div className="agent-interpretation"><span><CheckCircle2 size={14} /> {t('understood')}</span><div>{promptInterpretation.map((constraint) => <em key={constraint}>{displayValue(locale, constraint)}</em>)}</div><small>{recommendations.length} {t('matchesNow')}</small><button type="button" onClick={() => document.querySelector('#decision')?.scrollIntoView({ behavior: 'smooth' })}><Target size={14} /> {t('seePicks')}</button></div>}
         {labMode && <div className="agent-settings">
           <div><label><Target size={14} /> {locale === 'es' ? 'Estrategia del grupo' : 'Group strategy'}</label><div className="strategy-options">{([
             ['balanced', locale === 'es' ? 'Equilibrada' : 'Balanced'], ['average', locale === 'es' ? 'Media' : 'Average'], ['least-misery', locale === 'es' ? 'Que nadie pierda' : 'No one loses'], ['nash', locale === 'es' ? 'Nash justa' : 'Nash fair'],
@@ -876,22 +907,20 @@ function App() {
         </div>
       </section>
 
-      <nav className="workflow-nav" aria-label="Movie night workflow">
-        <a href="#people"><span>01</span><strong>{t('addPeople')}</strong><small>{t('importTaste')}</small></a>
-        <a href="#filters"><span>02</span><strong>{t('setLimits')}</strong><small>{t('narrowField')}</small></a>
-        <a href="#explore"><span>03</span><strong>{t('explore')}</strong><small>{t('tasteMap')}</small></a>
-        <a href="#decision"><span>04</span><strong>{t('decide')}</strong><small>{t('finalShortlist')}</small></a>
-      </nav>
-
       {showOnboarding && <section className="onboarding" aria-label={locale === 'es' ? 'Primeros pasos' : 'Getting started'}>
-        <div><Sparkles size={19} /><span><strong>{locale === 'es' ? 'Empieza en tres pasos' : 'Start in three steps'}</strong><small>{locale === 'es' ? 'Tus datos se procesan y guardan en este navegador.' : 'Your data is processed and stored in this browser.'}</small></span></div>
-        <ol><li><span>1</span>{locale === 'es' ? 'Importa tu ZIP de Letterboxd' : 'Import your Letterboxd ZIP'}</li><li><span>2</span>{locale === 'es' ? 'Elige plataformas y límites' : 'Choose platforms and limits'}</li><li><span>3</span>{locale === 'es' ? 'Compara o elige una recomendación' : 'Compare or pick a recommendation'}</li></ol>
+        <div className="demo-intro"><Sparkles size={19} /><span><strong>{locale === 'es' ? 'Mira una noche de cine de ejemplo' : 'See a movie night example'}</strong><small>{locale === 'es' ? 'Maya y Leo tienen gustos distintos. El agente busca el punto medio.' : 'Maya and Leo have different tastes. The agent finds common ground.'}</small></span></div>
+        <div className="demo-cast">
+          <span style={{ '--person': demoProfiles[0].color } as CSSProperties}><i>M</i><strong>Maya</strong><small>{locale === 'es' ? 'Drama · Romance · Ciencia ficción' : 'Drama · Romance · Sci-Fi'}</small></span>
+          <span style={{ '--person': demoProfiles[1].color } as CSSProperties}><i>L</i><strong>Leo</strong><small>{locale === 'es' ? 'Comedia · Misterio · Ciencia ficción' : 'Comedy · Mystery · Sci-Fi'}</small></span>
+          <span className="demo-request"><MessageSquareText size={14} /><strong>{locale === 'es' ? 'Punto en común' : 'Common ground'}</strong><small>{locale === 'es' ? 'Ciencia ficción en inglés · menos de 100 min' : 'English sci-fi · under 100 min'}</small></span>
+        </div>
+        <button className="run-demo" type="button" onClick={() => void runMayaLeoDemo()} disabled={conversationStatus === 'thinking'}>{conversationStatus === 'thinking' ? <LoaderCircle size={15} /> : <Play size={15} />} {locale === 'es' ? 'Ejecutar demo' : 'Run this demo'}</button>
         <button type="button" onClick={() => { localStorage.setItem('reel-circle-onboarding', 'done'); setShowOnboarding(false) }}><X size={15} /><span>{locale === 'es' ? 'Cerrar' : 'Dismiss'}</span></button>
       </section>}
 
       <section className="setup-grid">
       <section className="people-strip" id="people" aria-label="People in this session">
-        <div className="section-label"><span>01</span><div><strong>{t('whosWatching')}</strong><small>{profiles.length} {profiles.length === 1 ? t('personConnected') : t('peopleConnected')}</small></div></div>
+        <div className="section-label"><span><Users size={13} /></span><div><strong>{t('whosWatching')} <em>{locale === 'es' ? 'Opcional' : 'Optional'}</em></strong><small>{profiles.length} {profiles.length === 1 ? t('personConnected') : t('peopleConnected')}</small></div></div>
         <div className="people-list">
           {profiles.map((profile) => <div className={`person-chip ${profile.id === activeProfile?.id ? 'active' : ''}`} key={profile.id} style={{ '--person': profile.color } as CSSProperties}>
             <button className="person-select" type="button" onClick={() => setActiveProfileId(profile.id)}><span className="avatar">{profile.name.slice(0, 1).toUpperCase()}</span><span><strong>{profile.name}</strong><small>{profile.id === activeProfile?.id ? t('learningNow') : `${profile.ratings.length} ${t('ratings')}`}</small></span></button>
@@ -903,7 +932,7 @@ function App() {
       </section>
 
       <section className="control-strip" id="filters">
-        <div className="section-label"><span>02</span><div><strong>{t('boundaries')}</strong><small>{t('boundariesHelp')}</small></div></div>
+        <div className="section-label"><span><Target size={13} /></span><div><strong>{t('boundaries')} <em>{locale === 'es' ? 'Opcional' : 'Optional'}</em></strong><small>{t('boundariesHelp')}</small></div></div>
         <div className="filter-block"><label><Clock3 size={16} /> {t('runtime')}</label><div className="segments">
           {[{ label: t('any'), value: undefined }, { label: t('under90'), value: 90 }, { label: t('under2h'), value: 120 }].map((option) => <button type="button" key={option.label} className={maxRuntime === option.value ? 'active' : ''} onClick={() => setMaxRuntime(option.value)}>{option.label}</button>)}
         </div></div>
@@ -914,16 +943,16 @@ function App() {
       </section>
       </section>
 
-      <section className="workspace" id="explore">
+      <section className="workspace guided-workspace" id="explore">
         <div className="graph-panel">
-          <div className="panel-heading"><div><p className="eyebrow">{graphMode === 'neural' ? <Cpu size={14} /> : <Network size={14} />} 03 · {graphMode === 'taste' ? t('tasteMap') : graphMode === 'neural' ? 'MLP inspector' : 'Graph neural network'}</p><h2>{graphMode === 'taste' ? t('whereTastesMeet') : graphMode === 'neural' ? (locale === 'es' ? 'Observa cómo una película activa las neuronas' : 'Watch a movie activate neurons') : (locale === 'es' ? 'Inspecciona el paso de mensajes' : 'Inspect feature message passing')}</h2></div><div className="graph-actions">{labMode && <div className="graph-mode"><button type="button" className={graphMode === 'taste' ? 'active' : ''} onClick={() => setGraphMode('taste')}><Network size={14} /><span>{locale === 'es' ? 'Gustos' : 'Taste'}</span></button><button type="button" className={graphMode === 'neural' ? 'active' : ''} onClick={() => setGraphMode('neural')}><Cpu size={14} /><span>MLP</span></button><button type="button" className={graphMode === 'gnn' ? 'active' : ''} onClick={() => setGraphMode('gnn')}><Network size={14} /><span>GCN</span></button></div>}{labMode && graphMode === 'taste' && <button type="button" className={showDeepSignals ? 'active' : ''} title={locale === 'es' ? 'Alternar señales aprendidas' : 'Toggle deep learned signals'} onClick={() => setShowDeepSignals((current) => !current)}><Layers3 size={14} /><span>{locale === 'es' ? 'Señales' : 'Deep'}</span></button>}<span className="live-badge">{graphMode === 'neural' ? '34 · 12 · 6 · 1' : graphMode === 'gnn' ? '2 GCN LAYERS' : t('liveGraph')}</span>{graphMode === 'taste' && <button type="button" title={t('resetGraph')} aria-label={t('resetGraph')} onClick={() => { setRestoredPositions({}); setRenderedNodes(graphNodes) }}><RotateCcw size={14} /></button>}</div></div>
+          <div className="panel-heading"><div><p className="eyebrow">{graphMode === 'neural' ? <Cpu size={14} /> : <Network size={14} />} {graphMode === 'taste' ? t('tasteMap') : graphMode === 'neural' ? 'MLP inspector' : 'Graph neural network'}</p><h2>{graphMode === 'taste' ? t('whereTastesMeet') : graphMode === 'neural' ? (locale === 'es' ? 'Observa cómo una película activa las neuronas' : 'Watch a movie activate neurons') : (locale === 'es' ? 'Inspecciona el paso de mensajes' : 'Inspect feature message passing')}</h2></div><div className="graph-actions">{labMode && <div className="graph-mode"><button type="button" className={graphMode === 'taste' ? 'active' : ''} onClick={() => setGraphMode('taste')}><Network size={14} /><span>{locale === 'es' ? 'Gustos' : 'Taste'}</span></button><button type="button" className={graphMode === 'neural' ? 'active' : ''} onClick={() => setGraphMode('neural')}><Cpu size={14} /><span>MLP</span></button><button type="button" className={graphMode === 'gnn' ? 'active' : ''} onClick={() => setGraphMode('gnn')}><Network size={14} /><span>GCN</span></button></div>}{labMode && graphMode === 'taste' && <button type="button" className={showDeepSignals ? 'active' : ''} title={locale === 'es' ? 'Alternar señales aprendidas' : 'Toggle deep learned signals'} onClick={() => setShowDeepSignals((current) => !current)}><Layers3 size={14} /><span>{locale === 'es' ? 'Señales' : 'Deep'}</span></button>}<span className="live-badge">{graphMode === 'neural' ? '34 · 12 · 6 · 1' : graphMode === 'gnn' ? '2 GCN LAYERS' : t('liveGraph')}</span>{graphMode === 'taste' && <button type="button" title={t('resetGraph')} aria-label={t('resetGraph')} onClick={() => { setRestoredPositions({}); setRenderedNodes(graphNodes) }}><RotateCcw size={14} /></button>}</div></div>
           <div className="graph-canvas">{graphMode === 'taste' ? <><div className={`graph-column-labels ${showDeepSignals ? 'deep' : ''}`}><span>{t('people')}</span><span>{t('genres')}</span>{showDeepSignals && <span>{t('signals')}</span>}<span>{t('films')}</span></div>
             <ReactFlow nodes={renderedNodes} edges={graphEdges} onNodesChange={onNodesChange} onNodeDragStop={(_, node) => setRestoredPositions((current) => ({ ...current, [node.id]: node.position }))} fitView nodesDraggable nodesConnectable={false} onNodeClick={(_, node) => handleGraphNodeClick(node.id)}><Background color="#d8d3c8" gap={24} size={1} /><Controls showInteractive={false} /></ReactFlow></> : graphMode === 'neural' ? <><div className="graph-column-labels neural-labels"><span>34 inputs</span><span>12 ReLU</span><span>6 ReLU</span><span>Sigmoid</span></div><ReactFlow nodes={neuralGraphNodes} edges={neuralGraphEdges} fitView nodesDraggable={false} nodesConnectable={false} elementsSelectable={false}><Background color="#c6d7d0" gap={22} size={1} /><Controls showInteractive={false} /></ReactFlow><div className="neural-caption">Select a film to inspect activations · {activeNeuralExamples.length} labels · {activeNeuralResult?.status === 'ready' ? `loss ${activeNeuralResult.loss?.toFixed(3)}` : 'waiting for MLP'}</div></> : <><div className="graph-column-labels gcn-labels"><span>Feature nodes</span><span>Normalized messages</span><span>Movie embeddings</span></div><ReactFlow nodes={graphNeuralNodes} edges={graphNeuralEdges} fitView nodesDraggable={false} nodesConnectable={false} elementsSelectable={false}><Background color="#c7d8df" gap={22} size={1} /><Controls showInteractive={false} /></ReactFlow><div className="neural-caption">GCN: H² = ReLU(Â ReLU(Â X W⁰) W¹) · {activeGraphNeuralResult?.graphStats?.edges ?? 0} edges · {activeGraphNeuralResult?.status === 'ready' ? `loss ${activeGraphNeuralResult.loss?.toFixed(3)}` : 'waiting for GCN'}</div></>}
           </div>
         </div>
 
         <aside className="results-panel" id="decision">
-          <div className="panel-heading"><div><p className="eyebrow"><Sparkles size={14} /> 04 · {t('decide')}</p><h2>{t('tonightShortlist')}</h2></div><span>{recommendations.length} {t('matches')}</span></div>
+          <div className="panel-heading"><div><p className="eyebrow"><Sparkles size={14} /> {t('decide')}</p><h2>{t('tonightShortlist')}</h2></div><span>{recommendations.length} {t('matches')}</span></div>
           {selected ? <div className="hero-pick">
             <div className="poster-wrap"><img src={selected.movie.poster} alt={`${selected.movie.title} poster`} onError={usePosterFallback} /><span>{selected.score}%</span></div>
             <div className="pick-copy"><p className="rank">{t('bestBet')}</p><h3>{selected.movie.title}</h3><p className="metadata">{selected.movie.year} · {selected.movie.runtime} min · {displayValue(locale, selected.movie.tone ?? '')}</p><div className="availability">{selected.movie.platforms.map((platform) => <span key={platform}>{platform}</span>)}</div><p className="reason">{agentExplanations[selected.movie.id] ?? (conversationMessages.length ? explainPreferenceMatch(selected.movie, { ...conversationPreferences, maxRuntime, genres: activeGenres, platforms: activePlatforms, moods: activeMoods }) : `${localizeReason(locale, selected.reasons[0])}. ${localizeReason(locale, selected.reasons[1])}.`)}</p>
@@ -951,9 +980,30 @@ function App() {
         <article><span className="summary-icon blue"><Thermometer size={18} /></span><div><small>{t('groupBalance')}</small><strong>{selectedDisagreement <= 15 ? t('strongConsensus') : selectedDisagreement <= 30 ? t('goodCompromise') : t('mixedOpinions')}</strong><p>{selectedDisagreement} {t('pointSpread')}</p></div></article>
       </section>
 
-      {labMode && <section className="lab-accordions" aria-label="AI lab details">
+      {labMode && <section className="ai-story" aria-label={locale === 'es' ? 'Cómo eligió la IA' : 'How AI picked this'}>
+        <header className="ai-story-header">
+          <div><p className="eyebrow"><BrainCircuit size={15} /> {locale === 'es' ? 'Detrás de la elección' : 'Behind the pick'}</p><h2>{locale === 'es' ? 'Cómo llegamos a esta recomendación' : 'How this recommendation happened'}</h2><p>{latestUserRequest ?? (locale === 'es' ? 'Haz una petición o ejecuta la demo para ver el recorrido completo.' : 'Make a request or run the demo to see the complete journey.')}</p></div>
+          <div className={`ai-health ${latestAgentMeta ? 'ready' : ''}`}><i />{latestAgentMeta ? (locale === 'es' ? 'Recorrido completo' : 'Journey complete') : (locale === 'es' ? 'Esperando una petición' : 'Waiting for a request')}</div>
+        </header>
+        <div className="decision-pipeline">
+          <article className={latestAgentMeta ? 'complete' : ''}><span><MessageSquareText size={17} /></span><small>{locale === 'es' ? 'Entender' : 'Understand'}</small><strong>{locale === 'es' ? 'Convierte palabras en preferencias' : 'Turn words into preferences'}</strong><p>{promptInterpretation?.join(' · ') || (locale === 'es' ? 'Aún no hay preferencias' : 'No preferences yet')}</p></article>
+          <article className={latestAgentMeta ? 'complete' : ''}><span><ShieldCheck size={17} /></span><small>{locale === 'es' ? 'Respetar límites' : 'Respect limits'}</small><strong>{locale === 'es' ? 'Descarta lo que no encaja' : 'Remove what does not fit'}</strong><p>{conversationalObservation('filter_candidates') ?? (locale === 'es' ? 'Duración, idioma y exclusiones' : 'Runtime, language, and exclusions')}</p></article>
+          <article className={latestAgentMeta ? 'complete' : ''}><span><Database size={17} /></span><small>{locale === 'es' ? 'Buscar significado' : 'Search meaning'}</small><strong>{locale === 'es' ? 'Encuentra la vibra, no solo el género' : 'Match the vibe, not just genre'}</strong><p>{latestAgentMeta ? `${latestAgentMeta.semantic.embeddingModel} · ${latestAgentMeta.semantic.retrievalMode}` : (locale === 'es' ? 'Gemini + búsqueda vectorial' : 'Gemini + vector search')}</p></article>
+          <article className={latestAgentMeta ? 'complete' : ''}><span><Users size={17} /></span><small>{locale === 'es' ? 'Equilibrar' : 'Balance'}</small><strong>{locale === 'es' ? 'Compara los gustos del grupo' : 'Compare everyone’s taste'}</strong><p>{selected?.matchByProfile.map((match) => `${profiles.find(({ id }) => id === match.profileId)?.name ?? 'Viewer'} ${match.score}%`).join(' · ') || (locale === 'es' ? 'Esperando perfiles' : 'Waiting for profiles')}</p></article>
+          <article className={latestAgentMeta ? 'complete' : ''}><span><Sparkles size={17} /></span><small>{locale === 'es' ? 'Explicar' : 'Explain'}</small><strong>{selected?.movie.title ?? (locale === 'es' ? 'Sin elección aún' : 'No pick yet')}</strong><p>{selected ? (agentExplanations[selected.movie.id] ?? selected.reasons[0]) : (locale === 'es' ? 'La recomendación aparecerá aquí' : 'The recommendation will appear here')}</p></article>
+        </div>
+        <footer className="ai-story-footer">
+          <span><Bot size={14} /> Groq · {latestAgentMeta?.modelStatus ?? 'standby'}</span>
+          <span><Database size={14} /> {latestAgentMeta ? `${latestAgentMeta.semantic.dimensions}d · ${latestAgentMeta.semantic.retrievalMode}` : 'Qdrant standby'}</span>
+          <span><Activity size={14} /> {latestAgentMeta ? `${latestAgentMeta.trace.length} tools · ${latestAgentMeta.durationMs} ms` : 'No run yet'}</span>
+          <button type="button" onClick={exportPortfolioReport}><Download size={14} /> {locale === 'es' ? 'Exportar evidencia' : 'Export evidence'}</button>
+        </footer>
+      </section>}
+
+      {labMode && <section className="lab-accordions advanced-lab" aria-label="Advanced AI lab details">
+        <div className="advanced-lab-heading"><span>{locale === 'es' ? 'Herramientas avanzadas' : 'Advanced tools'}</span><small>{locale === 'es' ? 'Opcional · para inspección técnica' : 'Optional · for technical inspection'}</small></div>
         <details>
-          <summary><span><FlaskConical size={17} /><strong>{t('experimentLab')}</strong><small>{t('experimentHelp')}</small></span><ChevronRight size={17} /></summary>
+          <summary><span><FlaskConical size={17} /><strong>{locale === 'es' ? 'Experimentos de modelos' : 'Model experiments'}</strong><small>{locale === 'es' ? 'Avanzado · MLP, GCN y comparación de rankings' : 'Advanced · MLP, GCN, and ranking comparisons'}</small></span><ChevronRight size={17} /></summary>
           <div className="experiment-lab" aria-label="Model experiment results">
             <div className="lab-heading"><div><p className="eyebrow"><FlaskConical size={14} /> {t('experimentLab')} · {catalogSource === 'live' ? (locale === 'es' ? 'catálogo en vivo' : 'live catalog') : catalogSource === 'cached' ? (locale === 'es' ? 'catálogo guardado' : 'cached catalog') : (locale === 'es' ? 'catálogo local' : 'curated catalog')}</p><h2>{locale === 'es' ? 'Compara modelos e inspecciona decisiones' : 'Compare models, inspect decisions'}</h2></div><div className="lab-tools"><div className="model-switch"><button type="button" className={activeModel === 'mlp' ? 'active' : ''} onClick={() => setActiveModel('mlp')} disabled={activeNeuralResult?.status !== 'ready'}>MLP</button><button type="button" className={activeModel === 'gcn' ? 'active' : ''} onClick={() => setActiveModel('gcn')} disabled={activeGraphNeuralResult?.status !== 'ready'}>GCN</button></div><button type="button" className="reset-session" onClick={exportUserData}><Download size={14} /> {locale === 'es' ? 'Copia' : 'Backup'}</button><button type="button" className="reset-session danger" onClick={() => void deleteUserData()}><Trash2 size={14} /> {locale === 'es' ? 'Eliminar datos' : 'Delete data'}</button></div></div>
             <div className="lab-metrics">
@@ -970,7 +1020,7 @@ function App() {
           </div>
         </details>
         <details>
-          <summary><span><Bot size={17} /><strong>{t('autonomousAgent')}</strong><small>{t('autonomousHelp')}</small></span><ChevronRight size={17} /></summary>
+          <summary><span><Bot size={17} /><strong>{locale === 'es' ? 'Sandbox del agente' : 'Agent sandbox'}</strong><small>{locale === 'es' ? 'Avanzado · prueba objetivos y puertas de aprobación' : 'Advanced · test goals and approval gates'}</small></span><ChevronRight size={17} /></summary>
           <div className="autonomy-lab" aria-label="Autonomous agent mission">
             <div className="autonomy-header"><div><p className="eyebrow"><Bot size={14} /> {t('autonomousAgent')}</p><h2>{locale === 'es' ? 'Dale un objetivo e inspecciona cada paso' : 'Give it a goal, inspect every step'}</h2></div><div className="autonomy-actions"><span className={`agent-run-status ${agentStatus}`}><i />{locale === 'es' ? agentStatus.replace('idle', 'inactivo').replace('running', 'ejecutando').replace('awaiting input', 'esperando respuesta').replace('awaiting approval', 'esperando aprobación') : agentStatus.replace('-', ' ')}</span><button type="button" onClick={exportPortfolioReport}><Download size={14} /> {locale === 'es' ? 'Exportar informe' : 'Export report'}</button></div></div>
             <div className="mission-row"><label htmlFor="agent-goal"><strong>Mission</strong><small>The agent can parse, inspect, ask, train, compare, and propose.</small></label><input id="agent-goal" value={agentGoal} onChange={(event) => setAgentGoal(event.target.value)} placeholder="Choose a fair movie under two hours" /><button type="button" onClick={() => void runAgentMission()} disabled={agentStatus === 'running'}>{agentStatus === 'running' ? <Activity size={16} /> : <Play size={16} />}{agentStatus === 'running' ? 'Running...' : 'Run agent'}</button></div>

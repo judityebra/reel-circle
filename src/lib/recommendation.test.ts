@@ -57,6 +57,19 @@ describe('scoreCandidates', () => {
     expect(results.every(({ movie }) => movie.runtime <= 95)).toBe(true)
   })
 
+  it('uses mood as a soft ranking signal instead of eliminating alternatives', () => {
+    const moodCatalog = [
+      { ...catalog[1], id: 'gentle', rating: 3.5, moods: ['Gentle'] },
+      { ...catalog[2], id: 'playful', rating: 3.8, moods: ['Playful'] },
+    ]
+
+    const results = scoreCandidates(moodCatalog, profiles, { moods: ['Gentle'] })
+
+    expect(results).toHaveLength(2)
+    expect(results[0].movie.id).toBe('gentle')
+    expect(results[0].reasons).toContain('Mood match: Gentle')
+  })
+
   it('only returns movies on a selected streaming platform', () => {
     const results = scoreCandidates(catalog, profiles, { platforms: ['MUBI'] })
 
