@@ -138,7 +138,7 @@ The setup:
 
 ## 2. Preference extraction
 
-### Setup
+### Cases and metrics
 
 [`eval/extraction-cases.ts`](../eval/extraction-cases.ts) has 52 hand-written prompts:
 
@@ -214,7 +214,7 @@ That fails the build if deterministic field accuracy drops below 94% (baseline 9
 
 ## Limitations
 
-**Recommendation benchmark**
+### Recommendation benchmark limitations
 
 - **The world is synthetic and reflects my modelling choices.**
   - Utility is additive over genre, mood, language, director, era, runtime and quality. These are the same features the scorer and the networks see, which flatters feature-based models.
@@ -227,7 +227,7 @@ That fails the build if deterministic field accuracy drops below 94% (baseline 9
 - **The skip/pick/love mapping is a choice.** The thresholds (≥ 4.5 / ≥ 3) were not tuned. Other mappings will move `scorer+feedback`.
 - **The group eval is narrow.** It covers only triples, only `scorer+feedback` member profiles at 16 labels, no neural blending, and no runtime or platform constraints.
 
-**Extraction eval**
+### Extraction eval limitations
 
 - **The sample is small.** With 52 cases, one case is worth 1.9 points of exact match. No CIs are reported, and differences of a few points are noise.
 - **One annotator wrote the cases** and knew the app's genre and mood vocabulary. Real users phrase things more loosely, and probably in more varied ways, especially in Spanish.
