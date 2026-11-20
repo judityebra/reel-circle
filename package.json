@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "eval:recs": "tsx eval/recs.ts"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",
