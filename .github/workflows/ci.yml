@@ -21,6 +21,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm test
+      # Deterministic baseline is 95.1% field accuracy / 69.2% exact match (docs/EVALUATION.md).
+      - run: npm run eval:extraction -- --no-model --gate 0.94 --gate-exact 0.65
       - run: npm run test:e2e
       - run: npm run lint
       - run: npm run build

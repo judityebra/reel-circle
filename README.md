@@ -22,13 +22,16 @@ The default experience is a focused decision dashboard. The optional AI lab expo
 - **Conversation memory:** typed session preferences preserve exclusions and refinements without storing personal data on a server.
 - **Server agent:** optional OpenAI-compatible structured extraction with deterministic fallback, candidate tools, validation, latency, and trace metadata.
 - **Semantic retrieval:** rich TMDB documents, native Gemini or OpenAI-compatible embeddings, and optional Qdrant search rerank valid candidates for vibe-based requests.
-- **Quality:** 63 unit tests, an end-to-end movie-night workflow, ESLint, production builds, and dependency auditing in CI.
+- **Quality:** 110 unit tests, an end-to-end movie-night workflow, ESLint, production builds, dependency auditing, and an extraction-accuracy gate in CI.
+- **Evaluation:** a seeded synthetic benchmark comparing every recommender and group strategy with NDCG@10, Precision@10 and Spearman (95% CIs), plus a bilingual preference-extraction eval. See [docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## Project documentation
 
 See [PORTFOLIO.md](PORTFOLIO.md) for the model architecture, experiment methodology, demo script, and technically accurate portfolio wording.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for system boundaries, data flow, privacy decisions, and scaling constraints.
+
+See [docs/EVALUATION.md](docs/EVALUATION.md) for offline benchmark results, including where the models do not beat simple baselines, and their limitations. Run them with `npm run eval:recs` and `npm run eval:extraction`.
 
 ## Advanced features
 

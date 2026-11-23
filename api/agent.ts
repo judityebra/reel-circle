@@ -81,7 +81,7 @@ function sanitizeExtraction(value: unknown): ModelExtraction | undefined {
   }
 }
 
-async function extractWithModel(message: string, current: ConversationPreferences): Promise<ModelExtraction | undefined> {
+export async function extractWithModel(message: string, current: ConversationPreferences): Promise<ModelExtraction | undefined> {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) return undefined
   const baseUrl = (process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '')
@@ -131,7 +131,7 @@ async function extractWithModel(message: string, current: ConversationPreference
   return content ? sanitizeExtraction(JSON.parse(content)) : undefined
 }
 
-function mergeModelExtraction(current: ConversationPreferences, extraction: ModelExtraction, now: number): ConversationPreferences {
+export function mergeModelExtraction(current: ConversationPreferences, extraction: ModelExtraction, now: number): ConversationPreferences {
   return {
     ...current,
     genres: extraction.genres?.length ? extraction.genres : current.genres,

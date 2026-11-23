@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "eval:recs": "tsx eval/recs.ts",
+    "eval:extraction": "tsx eval/extraction.ts"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",
@@ -35,6 +37,7 @@
     "eslint-plugin-react-refresh": "^0.5.4",
     "fake-indexeddb": "^6.2.5",
     "globals": "^17.11.0",
+    "tsx": "^4.19.2",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.67.0",
     "vite": "^8.2.2",
