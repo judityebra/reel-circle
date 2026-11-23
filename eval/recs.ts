@@ -15,13 +15,15 @@ import {
   type Movie,
   type Profile,
   type RankingMode,
+  type RecommendationOptions,
   type TasteFeedback,
 } from '../src/lib/recommendation'
 import { bootstrapCI, formatInterval, mean, ndcgAtK, precisionAtK, spearman, type Interval } from './metrics'
 import { createRng, patchMathRandom, shuffle } from './rng'
-import { generateWorld, type SyntheticMovie, type SyntheticUser } from './synthetic'
+import { generateWorld, type SyntheticMovie, type SyntheticUser, type SyntheticWorld } from './synthetic'
 
 const LABEL_COUNTS = [8, 16, 32] as const
+type LabelCount = (typeof LABEL_COUNTS)[number]
 const K = 10
 const LIKED = 4
 const MISERY = 2.5
@@ -30,6 +32,14 @@ const APP_DEFAULT_GENRES = ['Drama', 'Comedy', 'Mystery', 'Romance', 'Sci-Fi']
 
 const METHODS = ['random', 'popularity', 'scorer', 'scorer+feedback', 'mlp', 'gcn', 'mlp-hybrid', 'gcn-hybrid'] as const
 type Method = (typeof METHODS)[number]
+
+const GROUP_STRATEGIES: RankingMode[] = ['balanced', 'average', 'least-misery', 'nash']
+const GROUP_SIZE = 3
+
+type Scores = Record<string, number>
+
+// ---------------------------------------------------------------------------
+// Configuration
 
 interface Config {
   seed: number
@@ -42,32 +52,55 @@ interface Config {
   json?: string
 }
 
+type NumericFlag = Exclude<keyof Config, 'json'>
+
+const DEFAULT_CONFIG: Required<Omit<Config, 'json'>> = {
+  seed: 2026,
+  users: 60,
+  movies: 150,
+  directors: 30,
+  heldOut: 50,
+  triples: 200,
+  groupLabels: 16,
+}
+
+const kebabToCamel = (flag: string) => flag.replace(/-(\w)/g, (_, letter: string) => letter.toUpperCase())
+
 function parseArgs(argv: string[]): Config {
-  const config: Config = { seed: 2026, users: 60, movies: 150, directors: 30, heldOut: 50, triples: 200, groupLabels: 16 }
+  const config: Config = { ...DEFAULT_CONFIG }
   for (let index = 0; index < argv.length; index += 1) {
-    const flag = argv[index].replace(/^--/, '')
+    const key = kebabToCamel(argv[index].replace(/^--/, ''))
     const value = argv[index + 1]
-    if (flag === 'json') { config.json = value; index += 1; continue }
-    const key = flag.replace(/-(\w)/g, (_, letter: string) => letter.toUpperCase()) as keyof Config
-    if (key in config && value !== undefined) {
-      ;(config as unknown as Record<string, number>)[key] = Number(value)
+    if (value === undefined) continue
+    if (key === 'json') {
+      config.json = value
+      index += 1
+    } else if (key in DEFAULT_CONFIG) {
+      config[key as NumericFlag] = Number(value)
       index += 1
     }
   }
   return config
 }
 
+// ---------------------------------------------------------------------------
+// Profiles, built the same way the app builds them
+
 /** The feedback mapping used to replay hidden ratings through the app's skip/pick/love controls. */
-export function ratingToFeedback(rating: number): TasteFeedback {
+function ratingToFeedback(rating: number): TasteFeedback {
   if (rating >= 4.5) return 'love'
   if (rating >= 3) return 'pick'
   return 'skip'
 }
 
+/** Same confidence (0–100) → blend weight (0–0.5) mapping App.tsx uses for neural hybrids. */
+const confidenceToBlend = (confidence: number) => confidence / 200
+
 /** preferredGenres exactly as App.tsx derives them on Letterboxd import (catalog order, rating ignored). */
 function derivePreferredGenres(catalog: Movie[], labelled: Movie[]): string[] {
   const titles = new Set(labelled.map(({ title }) => title.toLowerCase()))
-  const genres = [...new Set(catalog.filter((movie) => titles.has(movie.title.toLowerCase())).flatMap((movie) => movie.genres))].slice(0, 3)
+  const matched = catalog.filter((movie) => titles.has(movie.title.toLowerCase()))
+  const genres = [...new Set(matched.flatMap((movie) => movie.genres))].slice(0, 3)
   return genres.length ? genres : APP_DEFAULT_GENRES.slice(0, 2)
 }
 
@@ -89,13 +122,31 @@ function feedbackProfile(user: SyntheticUser, catalog: Movie[], labelled: Synthe
   )
 }
 
-const scorerScores = (heldOut: Movie[], profile: Profile, options: Parameters<typeof scoreCandidates>[2] = {}) =>
-  Object.fromEntries(scoreCandidates(heldOut, [profile], options).map(({ movie, score }) => [movie.id, score]))
+/** A fixed, user-specific label order; taking prefixes keeps the 8/16/32 label sets nested. */
+function createLabelPool(order: Map<string, SyntheticMovie[]>) {
+  return { take: (user: SyntheticUser, count: number) => order.get(user.id)!.slice(0, count) }
+}
+type LabelPool = ReturnType<typeof createLabelPool>
+
+// ---------------------------------------------------------------------------
+// Individual benchmark
 
 interface UserMetrics { ndcg: number; precision: number; spearman: number }
 
+interface IndividualResult {
+  metrics: Record<Method, UserMetrics[]>
+  confidence: { mlp: number[]; gcn: number[] }
+  notReady: number
+}
+
+const scorerScores = (heldOut: Movie[], profile: Profile, options: RecommendationOptions = {}): Scores =>
+  Object.fromEntries(scoreCandidates(heldOut, [profile], options).map(({ movie, score }) => [movie.id, score]))
+
+const hybridScores = (heldOut: Movie[], profile: Profile, model: { predictions: Scores; confidence: number }): Scores =>
+  scorerScores(heldOut, profile, { neuralScores: { [profile.id]: model.predictions }, neuralBlend: confidenceToBlend(model.confidence) })
+
 /** Rank held-out movies by score (stable, so ties keep the randomised held-out order). */
-function evaluateRanking(heldOut: Movie[], scores: Record<string, number>, user: SyntheticUser): UserMetrics {
+function evaluateRanking(heldOut: Movie[], scores: Scores, user: SyntheticUser): UserMetrics {
   const ranked = heldOut
     .map((movie, index) => ({ movie, index, score: scores[movie.id] ?? 0 }))
     .sort((left, right) => right.score - left.score || left.index - right.index)
@@ -107,8 +158,8 @@ function evaluateRanking(heldOut: Movie[], scores: Record<string, number>, user:
   }
 }
 
+/** TensorFlow.js prints a one-off "use tfjs-node" banner; keep benchmark output clean. */
 async function silently<T>(task: () => Promise<T>): Promise<T> {
-  // TensorFlow.js prints a one-off "use tfjs-node" banner; keep benchmark output clean.
   const warn = console.warn
   console.warn = () => {}
   try {
@@ -118,44 +169,50 @@ async function silently<T>(task: () => Promise<T>): Promise<T> {
   }
 }
 
-async function runIndividualBenchmark(world: ReturnType<typeof generateWorld>, heldOut: SyntheticMovie[], labelOrder: Map<string, SyntheticMovie[]>, rng: () => number) {
+async function runIndividualBenchmark(world: SyntheticWorld, heldOut: SyntheticMovie[], labels: LabelPool, rng: () => number) {
   const catalog = world.movies
-  const results: Record<number, Record<Method, UserMetrics[]>> = {}
-  const confidence: Record<number, { mlp: number[]; gcn: number[]; notReady: number }> = {}
+  const results = {} as Record<LabelCount, IndividualResult>
 
-  for (const labels of LABEL_COUNTS) {
-    results[labels] = Object.fromEntries(METHODS.map((method) => [method, []])) as unknown as Record<Method, UserMetrics[]>
-    confidence[labels] = { mlp: [], gcn: [], notReady: 0 }
+  for (const labelCount of LABEL_COUNTS) {
+    const result: IndividualResult = {
+      metrics: Object.fromEntries(METHODS.map((method) => [method, []])) as unknown as Record<Method, UserMetrics[]>,
+      confidence: { mlp: [], gcn: [] },
+      notReady: 0,
+    }
     const started = Date.now()
+
     for (const user of world.users) {
-      const labelled = labelOrder.get(user.id)!.slice(0, labels)
+      const labelled = labels.take(user, labelCount)
       const shipped = shippedProfile(user, catalog, labelled)
       const examples = buildNeuralExamples(catalog, shipped, [])
       const mlp = await silently(() => trainNeuralTaste(catalog, examples))
       const gcn = await silently(() => trainGraphNeuralTaste(catalog, examples))
-      if (mlp.status !== 'ready') confidence[labels].notReady += 1
-      if (gcn.status !== 'ready') confidence[labels].notReady += 1
-      confidence[labels].mlp.push(mlp.confidence)
-      confidence[labels].gcn.push(gcn.confidence)
+      result.notReady += [mlp, gcn].filter(({ status }) => status !== 'ready').length
+      result.confidence.mlp.push(mlp.confidence)
+      result.confidence.gcn.push(gcn.confidence)
 
-      const scoresByMethod: Record<Method, Record<string, number>> = {
+      // Key order matters: `random` draws from the seeded rng first.
+      const scoresByMethod: Record<Method, Scores> = {
         random: Object.fromEntries(heldOut.map(({ id }) => [id, rng()])),
         popularity: Object.fromEntries(heldOut.map(({ id, rating }) => [id, rating])),
         scorer: scorerScores(heldOut, shipped),
         'scorer+feedback': scorerScores(heldOut, feedbackProfile(user, catalog, labelled)),
         mlp: mlp.predictions,
         gcn: gcn.predictions,
-        'mlp-hybrid': scorerScores(heldOut, shipped, { neuralScores: { [user.id]: mlp.predictions }, neuralBlend: mlp.confidence / 200 }),
-        'gcn-hybrid': scorerScores(heldOut, shipped, { neuralScores: { [user.id]: gcn.predictions }, neuralBlend: gcn.confidence / 200 }),
+        'mlp-hybrid': hybridScores(heldOut, shipped, mlp),
+        'gcn-hybrid': hybridScores(heldOut, shipped, gcn),
       }
-      METHODS.forEach((method) => results[labels][method].push(evaluateRanking(heldOut, scoresByMethod[method], user)))
+      for (const method of METHODS) result.metrics[method].push(evaluateRanking(heldOut, scoresByMethod[method], user))
     }
-    process.stderr.write(`  ${labels} labels/user: ${world.users.length} users in ${((Date.now() - started) / 1000).toFixed(1)}s\n`)
+
+    results[labelCount] = result
+    process.stderr.write(`  ${labelCount} labels/user: ${world.users.length} users in ${((Date.now() - started) / 1000).toFixed(1)}s\n`)
   }
-  return { results, confidence }
+  return results
 }
 
-const GROUP_STRATEGIES: RankingMode[] = ['balanced', 'average', 'least-misery', 'nash']
+// ---------------------------------------------------------------------------
+// Group fairness benchmark
 
 interface GroupOutcome { mean: number; min: number; misery: number }
 
@@ -164,84 +221,120 @@ function outcomeFor(movie: Movie, members: SyntheticUser[]): GroupOutcome {
   return { mean: mean(ratings), min: Math.min(...ratings), misery: ratings.some((rating) => rating <= MISERY) ? 1 : 0 }
 }
 
-function runGroupBenchmark(config: Config, world: ReturnType<typeof generateWorld>, heldOut: SyntheticMovie[], labelOrder: Map<string, SyntheticMovie[]>, rng: () => number) {
-  const profiles = new Map(world.users.map((user) => [user.id, feedbackProfile(user, world.movies, labelOrder.get(user.id)!.slice(0, config.groupLabels))]))
+const bestBy = (outcomes: GroupOutcome[], better: (next: GroupOutcome, best: GroupOutcome) => boolean) =>
+  outcomes.reduce((best, next) => (better(next, best) ? next : best))
+
+function runGroupBenchmark(config: Config, world: SyntheticWorld, heldOut: SyntheticMovie[], labels: LabelPool, rng: () => number) {
+  const profiles = new Map(world.users.map((user) => [user.id, feedbackProfile(user, world.movies, labels.take(user, config.groupLabels))]))
   const rows: Record<string, GroupOutcome[]> = {
     random: [],
     ...Object.fromEntries(GROUP_STRATEGIES.map((strategy) => [strategy, []])),
     'oracle (max mean)': [],
     'oracle (max min)': [],
   }
+
   for (let triple = 0; triple < config.triples; triple += 1) {
-    const members = shuffle(rng, world.users).slice(0, 3)
+    const members = shuffle(rng, world.users).slice(0, GROUP_SIZE)
     const memberProfiles = members.map(({ id }) => profiles.get(id)!)
-    GROUP_STRATEGIES.forEach((strategy) => {
-      const top = scoreCandidates(heldOut, memberProfiles, { rankingMode: strategy })[0]
+    for (const strategy of GROUP_STRATEGIES) {
+      const [top] = scoreCandidates(heldOut, memberProfiles, { rankingMode: strategy })
       rows[strategy].push(outcomeFor(top.movie, members))
-    })
+    }
     rows.random.push(outcomeFor(heldOut[Math.floor(rng() * heldOut.length)], members))
+
     const outcomes = heldOut.map((movie) => outcomeFor(movie, members))
-    rows['oracle (max mean)'].push(outcomes.reduce((best, next) => next.mean > best.mean ? next : best))
-    rows['oracle (max min)'].push(outcomes.reduce((best, next) => next.min > best.min || (next.min === best.min && next.mean > best.mean) ? next : best))
+    rows['oracle (max mean)'].push(bestBy(outcomes, (next, best) => next.mean > best.mean))
+    rows['oracle (max min)'].push(bestBy(outcomes, (next, best) => next.min > best.min || (next.min === best.min && next.mean > best.mean)))
   }
   return rows
 }
 
+// ---------------------------------------------------------------------------
+// Report
+
+const percent = (value: number) => (value * 100).toFixed(1)
+
+function renderReport(
+  config: Config,
+  world: SyntheticWorld,
+  heldOut: SyntheticMovie[],
+  individual: Record<LabelCount, IndividualResult>,
+  groups: Record<string, GroupOutcome[]>,
+  ci: (values: number[]) => Interval,
+) {
+  const lines: string[] = []
+  const json = {
+    config,
+    individual: {} as Record<number, { confidence: { mlp: number; gcn: number }; metrics: Record<string, Record<keyof UserMetrics, Interval>> }>,
+    groups: {} as Record<string, Record<keyof GroupOutcome, Interval>>,
+  }
+
+  const heldOutRatings = world.users.flatMap((user) => heldOut.map(({ id }) => user.ratings[id]))
+  const likedShare = heldOutRatings.filter((rating) => rating >= LIKED).length / heldOutRatings.length
+  lines.push('# Recommendation benchmark', '')
+  lines.push(`seed=${config.seed} · ${config.movies} movies · ${config.directors} directors · ${config.users} users · ${config.heldOut} held-out movies (fixed) · ${config.movies - config.heldOut} label pool`)
+  lines.push(`held-out hidden ratings: mean ${mean(heldOutRatings).toFixed(2)}, ${percent(likedShare)}% liked (>= ${LIKED})`)
+  lines.push(`NDCG@${K} (linear gain = hidden rating), Precision@${K} (liked >= ${LIKED}), Spearman over all held-out movies. Mean [95% bootstrap CI] across users.`, '')
+
+  for (const labelCount of LABEL_COUNTS) {
+    const { metrics, confidence, notReady } = individual[labelCount]
+    const mlp = mean(confidence.mlp)
+    const gcn = mean(confidence.gcn)
+    lines.push(`## ${labelCount} labels per user`, '')
+    lines.push(`MLP confidence ${mlp.toFixed(1)} (blend ${percent(confidenceToBlend(mlp))}%) · GCN confidence ${gcn.toFixed(1)} (blend ${percent(confidenceToBlend(gcn))}%) · untrained models: ${notReady}`, '')
+    lines.push(`| Method | NDCG@${K} | Precision@${K} | Spearman |`, '| --- | --- | --- | --- |')
+
+    const table: Record<string, Record<keyof UserMetrics, Interval>> = {}
+    for (const method of METHODS) {
+      const rows = metrics[method]
+      const summary = {
+        ndcg: ci(rows.map((row) => row.ndcg)),
+        precision: ci(rows.map((row) => row.precision)),
+        spearman: ci(rows.map((row) => row.spearman)),
+      }
+      table[method] = summary
+      lines.push(`| ${method} | ${formatInterval(summary.ndcg)} | ${formatInterval(summary.precision)} | ${formatInterval(summary.spearman)} |`)
+    }
+    json.individual[labelCount] = { confidence: { mlp, gcn }, metrics: table }
+    lines.push('')
+  }
+
+  lines.push(`## Group fairness (${config.triples} random triples, members use scorer+feedback profiles from ${config.groupLabels} labels)`, '')
+  lines.push("Top pick scored on members' hidden ratings. Mean [95% bootstrap CI] across triples.", '')
+  lines.push(`| Strategy | Mean member rating | Min member rating | Someone rates <= ${MISERY} |`, '| --- | --- | --- | --- |')
+  for (const [strategy, rows] of Object.entries(groups)) {
+    const summary = {
+      mean: ci(rows.map((row) => row.mean)),
+      min: ci(rows.map((row) => row.min)),
+      misery: ci(rows.map((row) => row.misery * 100)),
+    }
+    json.groups[strategy] = summary
+    lines.push(`| ${strategy} | ${formatInterval(summary.mean, 2)} | ${formatInterval(summary.min, 2)} | ${formatInterval(summary.misery, 1)}% |`)
+  }
+
+  return { markdown: lines.join('\n'), json }
+}
+
+// ---------------------------------------------------------------------------
+
 async function main() {
   const config = parseArgs(process.argv.slice(2))
-  const restore = patchMathRandom(config.seed ^ 0x9e3779b9)
+  const restoreMathRandom = patchMathRandom(config.seed ^ 0x9e3779b9)
   const rng = createRng(config.seed)
   const world = generateWorld(rng, config)
   const shuffled = shuffle(rng, world.movies)
   const heldOut = shuffled.slice(0, config.heldOut)
   const trainPool = shuffled.slice(config.heldOut)
-  // Nested label sets: the 8 labels are a prefix of the 16, which are a prefix of the 32.
-  const labelOrder = new Map(world.users.map((user) => [user.id, shuffle(rng, trainPool)]))
-  const ciRng = createRng(config.seed + 1)
+  const labels = createLabelPool(new Map(world.users.map((user) => [user.id, shuffle(rng, trainPool)])))
 
   process.stderr.write(`Reel Circle recommendation benchmark (seed ${config.seed})\n`)
-  const { results, confidence } = await runIndividualBenchmark(world, heldOut, labelOrder, rng)
-  const groups = runGroupBenchmark(config, world, heldOut, labelOrder, rng)
-  restore()
+  const individual = await runIndividualBenchmark(world, heldOut, labels, rng)
+  const groups = runGroupBenchmark(config, world, heldOut, labels, rng)
+  restoreMathRandom()
 
-  const ci = (values: number[]) => bootstrapCI(values, ciRng)
-  const lines: string[] = []
-  const heldOutRatings = world.users.flatMap((user) => heldOut.map(({ id }) => user.ratings[id]))
-  lines.push(`# Recommendation benchmark`, '')
-  lines.push(`seed=${config.seed} · ${config.movies} movies · ${config.directors} directors · ${config.users} users · ${config.heldOut} held-out movies (fixed) · ${config.movies - config.heldOut} label pool`)
-  lines.push(`held-out hidden ratings: mean ${mean(heldOutRatings).toFixed(2)}, ${(heldOutRatings.filter((rating) => rating >= LIKED).length / heldOutRatings.length * 100).toFixed(1)}% liked (>= ${LIKED})`)
-  lines.push(`NDCG@${K} (linear gain = hidden rating), Precision@${K} (liked >= ${LIKED}), Spearman over all held-out movies. Mean [95% bootstrap CI] across users.`, '')
-
-  const json: Record<string, unknown> = { config, individual: {}, groups: {} }
-  for (const labels of LABEL_COUNTS) {
-    lines.push(`## ${labels} labels per user`, '')
-    lines.push(`MLP confidence ${mean(confidence[labels].mlp).toFixed(1)} (blend ${(mean(confidence[labels].mlp) / 2).toFixed(1)}%) · GCN confidence ${mean(confidence[labels].gcn).toFixed(1)} (blend ${(mean(confidence[labels].gcn) / 2).toFixed(1)}%) · untrained models: ${confidence[labels].notReady}`, '')
-    lines.push(`| Method | NDCG@${K} | Precision@${K} | Spearman |`, '| --- | --- | --- | --- |')
-    const table: Record<string, Record<string, Interval>> = {}
-    METHODS.forEach((method) => {
-      const rows = results[labels][method]
-      const summary = {
-        ndcg: ci(rows.map(({ ndcg }) => ndcg)),
-        precision: ci(rows.map(({ precision }) => precision)),
-        spearman: ci(rows.map(({ spearman: value }) => value)),
-      }
-      table[method] = summary
-      lines.push(`| ${method} | ${formatInterval(summary.ndcg)} | ${formatInterval(summary.precision)} | ${formatInterval(summary.spearman)} |`)
-    })
-    ;(json.individual as Record<number, unknown>)[labels] = { confidence: { mlp: mean(confidence[labels].mlp), gcn: mean(confidence[labels].gcn) }, metrics: table }
-    lines.push('')
-  }
-
-  lines.push(`## Group fairness (${config.triples} random triples, members use scorer+feedback profiles from ${config.groupLabels} labels)`, '')
-  lines.push('Top pick scored on members\' hidden ratings. Mean [95% bootstrap CI] across triples.', '')
-  lines.push(`| Strategy | Mean member rating | Min member rating | Someone rates <= ${MISERY} |`, '| --- | --- | --- | --- |')
-  Object.entries(groups).forEach(([strategy, rows]) => {
-    const summary = { mean: ci(rows.map((row) => row.mean)), min: ci(rows.map((row) => row.min)), misery: ci(rows.map((row) => row.misery * 100)) }
-    ;(json.groups as Record<string, unknown>)[strategy] = summary
-    lines.push(`| ${strategy} | ${formatInterval(summary.mean, 2)} | ${formatInterval(summary.min, 2)} | ${formatInterval(summary.misery, 1)}% |`)
-  })
-
-  console.log(lines.join('\n'))
+  const ciRng = createRng(config.seed + 1)
+  const { markdown, json } = renderReport(config, world, heldOut, individual, groups, (values) => bootstrapCI(values, ciRng))
+  console.log(markdown)
   if (config.json) writeFileSync(config.json, `${JSON.stringify(json, null, 2)}\n`)
 }
 
