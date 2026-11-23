@@ -68,6 +68,10 @@ The browser limits candidates to 250 and profiles to 12. Profiles contain prefer
 - `VITE_MOVIE_API_URL`: frontend API base, normally `/api` on Vercel.
 - `EMBEDDING_PROVIDER`, `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`, `EMBEDDING_API_KEY`, `EMBEDDING_DIMENSIONS`: native Gemini or OpenAI-compatible embedding provider.
 - `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_COLLECTION`: optional persistent vector search.
+- `AGENT_SERVICE_URL`: optional URL of the Python recommendation agent (`agent-service/`). Turns are forwarded there and fall back to this TypeScript pipeline on an HTTP error, an invalid answer, a network failure or a timeout.
+- `AGENT_SERVICE_TIMEOUT_MS`: how long to wait for the Python service; defaults to 4000.
+
+When `AGENT_SERVICE_URL` is set, `meta.agentService` says who answered: `{ "mode": "python" }`, or `{ "mode": "typescript-fallback", "fallbackReason": "timeout" | "unreachable" | "invalid-response" | "http-<status>" }`. The Python service also adds `meta.candidatesMeetingConstraints`.
 
 Groq example:
 

@@ -99,6 +99,10 @@ Successful live catalogs are cached in IndexedDB for 24 hours and rendered immed
 
 The browser never receives the model key and strips raw ratings and watched-film history before calling the agent. See [docs/AGENT_API.md](docs/AGENT_API.md) for the contract.
 
+### Python recommendation agent
+
+The recommendation agent is being ported to a Python LangGraph service in [`agent-service/`](agent-service/README.md). Set the server-only `AGENT_SERVICE_URL` (for example `http://127.0.0.1:8000` with `uv run uvicorn reel_circle_agent.api:app`) and `/api/agent` forwards each turn there. On an HTTP error, an invalid answer, a network failure or a timeout (`AGENT_SERVICE_TIMEOUT_MS`, default 4000) it answers with the TypeScript pipeline instead, and `meta.agentService` records which one answered and why. Without the variable, nothing changes.
+
 ## Import Letterboxd data
 
 1. In Letterboxd, open **Settings → Import & Export** and request an export.

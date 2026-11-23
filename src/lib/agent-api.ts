@@ -8,6 +8,13 @@ export interface AgentApiStep {
   observation: string
 }
 
+/** Why /api/agent answered with the TypeScript pipeline instead of the Python service. */
+export type AgentServiceFallbackReason = 'timeout' | 'unreachable' | 'invalid-response' | `http-${number}`
+
+export type AgentServiceInfo =
+  | { mode: 'python' }
+  | { mode: 'typescript-fallback'; fallbackReason: AgentServiceFallbackReason }
+
 export interface AgentApiResponse {
   preferences: ConversationPreferences
   recommendations: Array<{
@@ -32,6 +39,10 @@ export interface AgentApiResponse {
     }
     durationMs: number
     trace: AgentApiStep[]
+    /** Added by the Python recommendation agent: movies in the candidate pool that meet every hard constraint. */
+    candidatesMeetingConstraints?: number
+    /** Present when AGENT_SERVICE_URL is configured: who answered the turn. */
+    agentService?: AgentServiceInfo
   }
 }
 
