@@ -6,23 +6,26 @@
 Node names are the trace tool names the browser already knows. The graph is linear and
 deterministic for now; pauses (clarifying questions, relaxations), model extraction and
 server-side conversation state arrive in later tickets as conditional edges and a checkpointer on
-this same graph. Every node except `respond` appends one step to the response trace, so the trace
-shows what actually ran.
+this same graph. Outbound HTTP (embedding provider, Qdrant) uses the `http_client` passed in the
+run config, so callers and tests choose the transport. Every node except `respond` appends one step
+to the response trace, so the trace shows what actually ran.
 
 ADR 0002: `message`, `persons` and `candidate_pool` are per-turn input. When a checkpointer is
 added, they must stay out of the persisted state.
 """
 
+import inspect
 import operator
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal, TypedDict
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 from .preferences import Preferences, create_conversation_preferences, update_conversation_preferences
+from .retrieval import retrieve_semantically
 from .scoring import Movie, Person, Recommendation, broken_constraints, explain_preference_match, score_candidates
-from .semantic import retrieve_semantically
 
 StepStatus = Literal["completed", "skipped"]
 
@@ -64,12 +67,14 @@ def _status(did_work: bool) -> StepStatus:
     return "completed" if did_work else "skipped"
 
 
-def _traced(node: Callable[[TurnState], NodeResult]) -> Callable[[TurnState], dict[str, Any]]:
-    """Runs a node and records it as one trace step named after the node."""
+def _traced(node: Callable[..., NodeResult | Awaitable[NodeResult]]) -> Callable[..., Awaitable[dict[str, Any]]]:
+    """Runs a node (sync or async, with or without the run config) and records it as one trace step named after it."""
+    wants_config = len(inspect.signature(node).parameters) == 2
 
-    def run(state: TurnState) -> dict[str, Any]:
+    async def run(state: TurnState, config: RunnableConfig) -> dict[str, Any]:
         started = time.perf_counter()
-        update, status, observation = node(state)
+        outcome = node(state, config) if wants_config else node(state)
+        update, status, observation = await outcome if inspect.isawaitable(outcome) else outcome
         duration = round((time.perf_counter() - started) * 1000)
         step: TraceStep = {"tool": node.__name__, "status": status, "durationMs": duration, "observation": observation}
         return {**update, "trace": [step]}
@@ -92,9 +97,9 @@ def filter_candidates(state: TurnState) -> NodeResult:
     return update, _status(bool(pool)), f"{len(ranked)}/{len(pool)} candidates satisfy hard constraints"
 
 
-def semantic_retrieval(state: TurnState) -> NodeResult:
+async def semantic_retrieval(state: TurnState, config: RunnableConfig) -> NodeResult:
     ranked = state["ranked"]
-    result = retrieve_semantically(state["message"], ranked)
+    result = await retrieve_semantically(state["message"], ranked, config["configurable"]["http_client"])
     matches = sum(1 for recommendation in result["recommendations"] if recommendation["semanticScore"] > 0)
     source = f"{result['retrievalMode']} · {result['embeddingModel']} · {result['dimensions']}d"
     update = {"ranked": result["recommendations"], "semantic": result}
@@ -148,7 +153,9 @@ def respond(state: TurnState) -> dict[str, Any]:
                 "modelStatus": "not-configured",
                 "candidatesMeetingConstraints": state["candidates_meeting_constraints"],
                 "semantic": {
-                    key: semantic[key] for key in ("retrievalMode", "embeddingMode", "embeddingModel", "dimensions")
+                    key: semantic[key]
+                    for key in ("retrievalMode", "embeddingMode", "embeddingModel", "dimensions", "fallbackReason")
+                    if key in semantic
                 },
                 "durationMs": round((time.perf_counter() - state["started_at"]) * 1000),
                 "trace": state["trace"],

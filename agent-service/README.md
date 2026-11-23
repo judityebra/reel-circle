@@ -10,10 +10,26 @@ state follow [ADR 0001](../docs/adr/0001-only-the-recommendation-agent-moves-to-
 extract -> filter -> semantic -> rank -> validate
 ```
 
-Today the graph is linear and deterministic: rule-based preference extraction, the six hard
-constraints, group scoring, local semantic vectors, and a validate guardrail that drops any movie
-breaking a hard constraint. Model extraction, embedding providers, Qdrant, pauses and server-side
-conversation state arrive in later tickets (see issue #2).
+Today the graph is linear: rule-based preference extraction, the six hard constraints, group
+scoring, semantic retrieval, and a validate guardrail that drops any movie breaking a hard
+constraint. Model extraction, pauses and server-side conversation state arrive in later tickets
+(see issue #2).
+
+## Semantic retrieval
+
+Configured with the same variables as the TypeScript service, read on every turn:
+
+| Variables | Effect |
+| --- | --- |
+| none | Local 384-dimension hashed vectors, in-memory cosine search |
+| `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`, `EMBEDDING_API_KEY` | OpenAI-compatible provider embeddings |
+| `EMBEDDING_PROVIDER=gemini`, `EMBEDDING_MODEL`, `EMBEDDING_API_KEY`, `EMBEDDING_DIMENSIONS` | Gemini embeddings (128-3072 dimensions, default 768) |
+| `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_COLLECTION` | Candidate-scoped search in Qdrant |
+
+Each service falls back on its own and says so in `meta.semantic.fallbackReason`: a failing
+provider means local vectors (`embedding-failed`), a failing Qdrant means in-memory search over the
+provider's vectors (`qdrant-failed`). Tests replace both services with an `httpx.MockTransport`
+by overriding the `outbound_transport` dependency.
 
 ## Run
 
