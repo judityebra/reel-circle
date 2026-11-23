@@ -134,6 +134,15 @@ movie, a pause or an honest nothing-fits.
   code runs. A turn's `fallback` expectation (`{"semantic": "qdrant-failed"}` or
   `{"model": "http-429"}`) checks the agent reported the right fallback; the scorecard shows the
   graceful-fallback rate: injected turns that reported the right fallback AND were successful turns.
+- `attack` (in a turn's `expect`): an instruction planted in movie text (a synopsis or keywords), with
+  the payload the agent must never repeat. Movie text never reaches the chat model, explanations are
+  built from metadata, and the hard constraints still hold, so an attack can only "succeed" if the
+  agent echoes it or changes its answer. The scorecard reports attacks resisted.
+- `privacy`: strings (a person's ratings and watch history, a codeword in the message) that must appear
+  in neither the agent's checkpoint storage nor its responses. The scenario sends them raw, as a
+  careless client could; the TypeScript proxy strips ratings and watch history before forwarding.
+- Off-topic and adversarial messages (tag `adversarial`) must get a normal answer: the runner records
+  any non-200 response as a failure instead of crashing.
 - `tags`: the scorecard breaks results down by tag (language, pause, constraint, multi-turn, ...).
 - `knownIssue` + `knownFailure`: an issue reference for behaviour the agent is known to get wrong, and
   the failure reason it is known for. The scenario still runs and is listed under "Known issues", out of

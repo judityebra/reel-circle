@@ -1,0 +1,46 @@
+{
+  "id": "en-adversarial-off-topic",
+  "lang": "en",
+  "tags": [
+    "adversarial",
+    "genres",
+    "multi-turn"
+  ],
+  "turns": [
+    {
+      "message": "What's the weather in Madrid?",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        }
+      }
+    },
+    {
+      "message": "Anyway, something funny",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ]
+        }
+      }
+    }
+  ]
+}

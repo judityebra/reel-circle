@@ -1,0 +1,31 @@
+{
+  "id": "en-adversarial-long-message",
+  "lang": "en",
+  "tags": [
+    "adversarial",
+    "genres",
+    "single-turn"
+  ],
+  "turns": [
+    {
+      "message": "please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please please something funny",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ]
+        }
+      }
+    }
+  ]
+}
