@@ -32,6 +32,11 @@ export interface AgentApiResponse {
     }
     durationMs: number
     trace: AgentApiStep[]
+    /** Present when AGENT_SERVICE_URL is configured: who answered the turn. */
+    agentService?: {
+      mode: 'python' | 'typescript-fallback'
+      fallbackReason?: 'timeout' | 'unreachable' | 'invalid-response' | `http-${number}`
+    }
   }
 }
 

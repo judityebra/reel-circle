@@ -147,11 +147,55 @@ export function mergeModelExtraction(current: ConversationPreferences, extractio
   }
 }
 
+type AgentPayload = Record<string, unknown> & { meta: Record<string, unknown> }
+type AgentServiceOutcome =
+  | { mode: 'python'; payload: AgentPayload }
+  | { mode: 'typescript-fallback'; fallbackReason: 'timeout' | 'unreachable' | 'invalid-response' | `http-${number}` }
+
+// Leaves room for the TypeScript fallback inside a 10-second serverless function limit.
+const DEFAULT_AGENT_SERVICE_TIMEOUT_MS = 4_000
+
+const isAgentPayload = (value: unknown): value is AgentPayload =>
+  isRecord(value) && isRecord(value.preferences) && Array.isArray(value.recommendations) && isRecord(value.meta) && Array.isArray(value.meta.trace)
+
+/** Asks the Python recommendation agent (agent-service/) for this turn; any failure means "use TypeScript". */
+async function askAgentService(serviceUrl: string, input: AgentRequest): Promise<AgentServiceOutcome> {
+  const timeoutMs = Number(process.env.AGENT_SERVICE_TIMEOUT_MS) || DEFAULT_AGENT_SERVICE_TIMEOUT_MS
+  try {
+    const response = await fetch(`${serviceUrl.replace(/\/$/, '')}/agent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    if (!response.ok) return { mode: 'typescript-fallback', fallbackReason: `http-${response.status}` }
+    const payload: unknown = await response.json()
+    return isAgentPayload(payload) ? { mode: 'python', payload } : { mode: 'typescript-fallback', fallbackReason: 'invalid-response' }
+  } catch (error) {
+    const timedOut = error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError')
+    return { mode: 'typescript-fallback', fallbackReason: timedOut ? 'timeout' : 'unreachable' }
+  }
+}
+
 export default async function handler(request: ServerlessRequest, response: ServerlessResponse) {
   if (request.method !== 'POST') return response.status(405).json({ error: 'Method not allowed' })
   const input = parseRequest(request.body)
   if (!input) return response.status(400).json({ error: 'A message of 1-1000 characters is required' })
 
+  response.setHeader('Cache-Control', 'no-store')
+  const serviceUrl = process.env.AGENT_SERVICE_URL
+  if (!serviceUrl) return response.status(200).json(await runTypeScriptAgent(input))
+
+  const outcome = await askAgentService(serviceUrl, input)
+  if (outcome.mode === 'python') {
+    return response.status(200).json({ ...outcome.payload, meta: { ...outcome.payload.meta, agentService: { mode: 'python' } } })
+  }
+  const payload = await runTypeScriptAgent(input)
+  return response.status(200).json({ ...payload, meta: { ...payload.meta, agentService: { mode: outcome.mode, fallbackReason: outcome.fallbackReason } } })
+}
+
+/** The TypeScript recommendation agent: used without a service URL, and as the fallback when the service fails. */
+async function runTypeScriptAgent(input: AgentRequest): Promise<AgentPayload> {
   const startedAt = Date.now()
   const trace: AgentStep[] = []
   const current = input.preferences ?? createConversationPreferences(startedAt)
@@ -202,8 +246,7 @@ export default async function handler(request: ServerlessRequest, response: Serv
   ).length
   trace.push({ tool: 'validate_results', status: 'completed', durationMs: 0, observation: `${violations} hard-constraint violations` })
 
-  response.setHeader('Cache-Control', 'no-store')
-  return response.status(200).json({
+  return {
     preferences,
     recommendations,
     clarificationQuestion: modelExtraction?.clarificationQuestion,
@@ -221,5 +264,5 @@ export default async function handler(request: ServerlessRequest, response: Serv
       durationMs: Date.now() - startedAt,
       trace,
     },
-  })
+  }
 }
