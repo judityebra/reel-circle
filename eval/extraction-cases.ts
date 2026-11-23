@@ -1,5 +1,7 @@
 /**
- * Hand-written extraction test prompts (English and Spanish, single- and multi-turn).
+ * Types and annotation guide for the hand-labelled extraction cases (English and Spanish, single-
+ * and multi-turn). The cases themselves live in fixtures/extraction-cases.json, shared with the
+ * Python recommendation agent; label new cases there following this guide.
  *
  * Annotation guide, applied before looking at any parser output:
  * - genres / excludedGenres: only genres the user explicitly asks for or rules out, using the

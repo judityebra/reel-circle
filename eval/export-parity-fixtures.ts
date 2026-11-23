@@ -7,11 +7,10 @@
  * JSON is the review of that change.
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { buildParityFixtures } from './agent-parity'
+import { buildParityFixtures, PARITY_FIXTURES_URL } from './agent-parity'
 
-const target = new URL('../fixtures/agent-parity.json', import.meta.url)
 const fixtures = await buildParityFixtures()
-mkdirSync(new URL('.', target), { recursive: true })
-writeFileSync(target, `${JSON.stringify(fixtures, null, 2)}\n`)
+mkdirSync(new URL('.', PARITY_FIXTURES_URL), { recursive: true })
+writeFileSync(PARITY_FIXTURES_URL, `${JSON.stringify(fixtures, null, 2)}\n`)
 const turns = fixtures.conversations.reduce((total, { turns }) => total + turns.length, 0)
 console.log(`Wrote ${fixtures.conversations.length} conversations (${turns} turns, ${fixtures.candidatePool.length} candidate movies) to fixtures/agent-parity.json`)
