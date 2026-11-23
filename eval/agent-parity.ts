@@ -123,7 +123,7 @@ const curatedText: Record<string, Pick<Movie, 'overview' | 'keywords'>> = {
 }
 
 /** The candidate pool: the curated catalog plus a seeded synthetic slate, without posters or latent quality. */
-export function buildCandidatePool(): Movie[] {
+function buildCandidatePool(): Movie[] {
   const world = generateWorld(createRng(FIXTURE_SEED), { movies: 60, users: 0, directors: 12 })
   const synthetic = world.movies.map((movie) => withoutKey(movie, 'quality'))
   const curated = catalog.map((movie) => ({ ...withoutKey(movie, 'poster'), ...curatedText[movie.id] }))
@@ -137,7 +137,7 @@ const learnedWeights: Record<string, Pick<Profile, 'tasteWeights' | 'featureWeig
 }
 
 /** Persons as the browser sends them: no ratings, no watch history, only preferred genres and learned weights. */
-export function buildPersons(): Profile[] {
+function buildPersons(): Profile[] {
   const sam = { id: 'sam', name: 'Sam', color: '#4169c1', preferredGenres: ['Thriller', 'Crime'] }
   return [...demoProfiles, sam].map(({ id, name, color, preferredGenres }) => ({
     id, name, color, preferredGenres, ...learnedWeights[id], ratings: [], watched: [],

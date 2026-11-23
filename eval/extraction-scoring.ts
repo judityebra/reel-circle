@@ -6,7 +6,7 @@ export const FIELDS = ['genres', 'excludedGenres', 'moods', 'platforms', 'maxRun
 export type Field = (typeof FIELDS)[number]
 
 /** Year at or beyond which a predicted range end counts as "open-ended". */
-export const OPEN_END_YEAR = 2024
+const OPEN_END_YEAR = 2024
 
 const platformKey = (value: string) => value.toLowerCase().replace(/^hbo\s+/, '').replace(/[^a-z0-9]/g, '')
 

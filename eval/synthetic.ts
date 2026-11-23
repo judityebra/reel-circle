@@ -11,9 +11,9 @@ import { normal, pick, shuffle } from './rng'
  * hidden rating for every movie. Models only ever see the ratings sampled as labels.
  */
 
-export const GENRES = ['Action', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller'] as const
-export const MOODS = ['Gentle', 'Playful', 'Electric', 'Reflective', 'Twisty'] as const
-export const LANGUAGES = ['English', 'Spanish', 'French', 'Korean', 'Japanese'] as const
+const GENRES = ['Action', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller'] as const
+const MOODS = ['Gentle', 'Playful', 'Electric', 'Reflective', 'Twisty'] as const
+const LANGUAGES = ['English', 'Spanish', 'French', 'Korean', 'Japanese'] as const
 const LANGUAGE_WEIGHTS = [0.5, 0.2, 0.12, 0.1, 0.08]
 const PLATFORMS = ['Netflix', 'Prime Video', 'Filmin', 'MUBI', 'Max', 'Disney+', 'Movistar Plus+']
 
@@ -139,7 +139,7 @@ function generateUser(rng: () => number, index: number, directors: SyntheticDire
 }
 
 /** Latent utility of a movie for a user, before noise. Exported for tests. */
-export function latentUtility(user: Omit<SyntheticUser, 'ratings'>, movie: SyntheticMovie): number {
+function latentUtility(user: Omit<SyntheticUser, 'ratings'>, movie: SyntheticMovie): number {
   const genre = movie.genres.reduce((total, name) => total + user.genreAffinity[name], 0) / movie.genres.length
   const mood = (movie.moods ?? []).reduce((total, name) => total + user.moodAffinity[name], 0) / Math.max(1, movie.moods?.length ?? 0)
   const language = user.languageAffinity[movie.language ?? 'English'] ?? 0
