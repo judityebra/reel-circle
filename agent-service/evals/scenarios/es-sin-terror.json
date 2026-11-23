@@ -1,0 +1,28 @@
+{
+  "id": "es-sin-terror",
+  "lang": "es",
+  "tags": [
+    "single-turn",
+    "exclusions"
+  ],
+  "turns": [
+    {
+      "message": "Nada de terror, por favor",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "excludes": [
+          "Horror"
+        ],
+        "results": {
+          "min": 3
+        }
+      }
+    }
+  ]
+}

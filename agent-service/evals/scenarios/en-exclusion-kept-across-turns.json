@@ -1,0 +1,50 @@
+{
+  "id": "en-exclusion-kept-across-turns",
+  "lang": "en",
+  "tags": [
+    "multi-turn",
+    "exclusions",
+    "runtime"
+  ],
+  "turns": [
+    {
+      "message": "No horror tonight",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "excludes": [
+          "Horror"
+        ],
+        "results": {
+          "min": 3
+        }
+      }
+    },
+    {
+      "message": "Something under two hours",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "excludes": [
+          "Horror"
+        ],
+        "preferences": {
+          "maxRuntime": 120
+        },
+        "results": {
+          "min": 1
+        }
+      }
+    }
+  ]
+}

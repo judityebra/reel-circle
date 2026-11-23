@@ -1,0 +1,45 @@
+{
+  "id": "es-empezar-de-nuevo",
+  "lang": "es",
+  "tags": [
+    "multi-turn",
+    "start-over",
+    "languages"
+  ],
+  "turns": [
+    {
+      "message": "Una comedia en Netflix",
+      "expect": {
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ],
+          "platforms": [
+            "Netflix"
+          ]
+        }
+      }
+    },
+    {
+      "message": "Empezar de nuevo: un drama coreano",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "preferences": {
+          "genres": [
+            "Drama"
+          ],
+          "languages": [
+            "ko"
+          ],
+          "platforms": []
+        }
+      }
+    }
+  ]
+}
