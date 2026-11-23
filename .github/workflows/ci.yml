@@ -27,3 +27,26 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
+  agent-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: agent-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      # Includes parity with the TypeScript pipeline over fixtures/agent-parity.json.
+      - run: uv run pytest
+      - run: docker build -t reel-circle-agent .
+      - name: Container answers its health check
+        run: |
+          docker run -d --name agent -p 8000:8000 reel-circle-agent
+          for attempt in $(seq 1 20); do curl -fsS http://127.0.0.1:8000/health && exit 0; sleep 1; done
+          docker logs agent
+          exit 1
