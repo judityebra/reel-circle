@@ -26,8 +26,8 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
 
-from .conversations import ConversationStore, is_conversation_id, open_checkpointer
-from .graph import TurnInput, build_graph
+from .conversations import ConversationStore, is_conversation_id, open_checkpointer, remembered_conversations
+from .graph import TurnInput
 from .model_extraction import DEFAULT_RETRY_POLICY, RetryPolicy, configured_chat_model
 
 
@@ -42,7 +42,7 @@ class Conversations:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with open_checkpointer(os.environ.get("CHECKPOINT_DATABASE_URL")) as saver:
-        app.state.conversations = Conversations(build_graph(saver), ConversationStore(saver))
+        app.state.conversations = Conversations(*remembered_conversations(saver))
         try:
             yield
         finally:
@@ -60,8 +60,7 @@ _OUTBOUND_SSL = ssl.create_default_context(cafile=certifi.where())
 
 @lru_cache(maxsize=1)
 def _in_memory_conversations() -> Conversations:
-    saver = InMemorySaver()
-    return Conversations(build_graph(saver), ConversationStore(saver))
+    return Conversations(*remembered_conversations(InMemorySaver()))
 
 
 def conversations(request: Request) -> Conversations:
@@ -69,9 +68,9 @@ def conversations(request: Request) -> Conversations:
     return getattr(request.app.state, "conversations", None) or _in_memory_conversations()
 
 
-def clock() -> float:
-    """Current time in seconds; tests override it to move through conversation expiry."""
-    return time.time()
+def clock() -> int:
+    """Current time in milliseconds; tests override it to move through conversation expiry."""
+    return int(time.time() * 1000)
 
 
 def model_retry_policy() -> RetryPolicy:
@@ -138,18 +137,17 @@ async def agent_turn(
     chat_model: Annotated[BaseChatModel | None, Depends(configured_chat_model)],
     retry_policy: Annotated[RetryPolicy, Depends(model_retry_policy)],
     remembered: Annotated[Conversations, Depends(conversations)],
-    now: Annotated[float, Depends(clock)],
+    now_ms: Annotated[int, Depends(clock)],
 ) -> JSONResponse:
     try:
         body = json.loads(await request.body())
         conversation_id = parse_conversation_id(body) or str(uuid.uuid4())
     except ValueError:
-        return JSONResponse(_BAD_MESSAGE | {"error": "Invalid request"}, status_code=400)
+        return JSONResponse({"error": "Invalid request"}, status_code=400)
     turn = parse_turn(body)
     if turn is None:
         return JSONResponse(_BAD_MESSAGE, status_code=400)
 
-    now_ms = int(now * 1000)
     await remembered.store.sweep_hourly(now_ms)
     await remembered.store.forget_if_idle(conversation_id, now_ms)
     async with httpx.AsyncClient(transport=transport, timeout=_OUTBOUND_TIMEOUT, verify=_OUTBOUND_SSL) as client:
@@ -161,7 +159,7 @@ async def agent_turn(
             "chat_model": chat_model,
             "model_retry": retry_policy,
         }
-        result = await remembered.agent.ainvoke({}, config={"configurable": settings})
+        result = await remembered.agent.ainvoke({}, config={"configurable": settings}, durability="exit")
     payload = {**result["response"], "conversationId": conversation_id}
     return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 

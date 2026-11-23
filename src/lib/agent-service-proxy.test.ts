@@ -22,16 +22,18 @@ interface AgentBody {
 
 interface Captured { status: number; body: AgentBody; headers: Record<string, string> }
 
-async function callRecommendationAgent(body: unknown): Promise<Captured> {
+async function callHandler(method: string, body: unknown): Promise<Captured> {
   const captured: Captured = { status: 0, body: { recommendations: [], meta: {} }, headers: {} }
   const response = {
     status(code: number) { captured.status = code; return response },
     json(payload: unknown) { captured.body = payload as AgentBody },
     setHeader(name: string, value: string) { captured.headers[name] = value },
   }
-  await handler({ method: 'POST', body }, response)
+  await handler({ method, body }, response)
   return captured
 }
+
+const callRecommendationAgent = (body: unknown) => callHandler('POST', body)
 
 const jsonResponse = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => body })
 
@@ -156,26 +158,20 @@ describe('conversations remembered by the Python service', () => {
     expect((body as unknown as { conversationId?: string }).conversationId).toBe('conv-123')
   })
 
-  it('drops a malformed conversation id instead of forwarding it', async () => {
+  it('rejects a malformed conversation id, like the Python service', async () => {
     process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
     const fetcher = vi.fn(async () => jsonResponse(200, pythonPayload))
     vi.stubGlobal('fetch', fetcher)
-    await callRecommendationAgent({ ...turn, conversationId: '../../etc/passwd' })
-    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
-    expect(JSON.parse(init.body as string).conversationId).toBeUndefined()
+    const { status } = await callRecommendationAgent({ ...turn, conversationId: '../../etc/passwd' })
+    expect(status).toBe(400)
+    expect(fetcher).not.toHaveBeenCalled()
   })
 
   it('asks the Python service to forget a conversation', async () => {
     process.env.AGENT_SERVICE_URL = 'https://agent.example.test/'
     const fetcher = vi.fn(async () => ({ ok: true, status: 204, json: async () => ({}) }))
     vi.stubGlobal('fetch', fetcher)
-    const captured: Captured = { status: 0, body: { recommendations: [], meta: {} }, headers: {} }
-    const response = {
-      status(code: number) { captured.status = code; return response },
-      json(payload: unknown) { captured.body = payload as AgentBody },
-      setHeader() {},
-    }
-    await handler({ method: 'DELETE', body: { conversationId: 'conv-123' } }, response)
+    const captured = await callHandler('DELETE', { conversationId: 'conv-123' })
     expect(captured.status).toBe(200)
     expect(captured.body).toEqual({ deleted: true })
     const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
@@ -186,14 +182,8 @@ describe('conversations remembered by the Python service', () => {
   it('has nothing to forget without a Python service', async () => {
     const fetcher = vi.fn()
     vi.stubGlobal('fetch', fetcher)
-    const captured: { status: number; body: unknown } = { status: 0, body: undefined }
-    const response = {
-      status(code: number) { captured.status = code; return response },
-      json(payload: unknown) { captured.body = payload },
-      setHeader() {},
-    }
-    await handler({ method: 'DELETE', body: { conversationId: 'conv-123' } }, response)
-    expect(captured).toEqual({ status: 200, body: { deleted: false } })
+    const { status, body } = await callHandler('DELETE', { conversationId: 'conv-123' })
+    expect({ status, body }).toEqual({ status: 200, body: { deleted: false } })
     expect(fetcher).not.toHaveBeenCalled()
   })
 })

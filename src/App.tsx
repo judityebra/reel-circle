@@ -71,6 +71,8 @@ function App() {
   const [conversationPreferences, setConversationPreferences] = useState<ConversationPreferences>(() => createConversationPreferences())
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([])
   const [conversationId, setConversationId] = useState<string | undefined>()
+  // Bumped on every reset, so a turn still in flight can't bring back the conversation that was just forgotten.
+  const conversationGeneration = useRef(0)
   const [conversationStatus, setConversationStatus] = useState<'idle' | 'thinking'>('idle')
   const [agentExplanations, setAgentExplanations] = useState<Record<string, string>>({})
   const [latestAgentMeta, setLatestAgentMeta] = useState<AgentApiResponse['meta'] | null>(null)
@@ -637,6 +639,7 @@ function App() {
     const prompt = suggestedPrompt ?? constraintPrompt
     if (!prompt.trim() || conversationStatus === 'thinking') return
     setConversationStatus('thinking')
+    const generation = conversationGeneration.current
     const apiUrl = import.meta.env.VITE_MOVIE_API_URL as string | undefined
     let next = updateConversationPreferences(startingPreferences, prompt)
     let reply: string | undefined
@@ -645,7 +648,7 @@ function App() {
       try {
         const result = await requestAgentTurn(apiUrl, prompt, startingPreferences, movieCatalog, turnProfiles, { conversationId: activeConversationId })
         next = result.preferences
-        setConversationId(result.conversationId)
+        if (generation === conversationGeneration.current) setConversationId(result.conversationId)
         setLatestAgentMeta(result.meta)
         selectedMovieId = result.recommendations[0]?.movie.id
         setAgentExplanations(Object.fromEntries(result.recommendations.map(({ movie, explanation }) => [movie.id, explanation])))
@@ -687,11 +690,20 @@ function App() {
     setConversationStatus('idle')
   }
 
-  /** Starts a new conversation: the server forgets the old one (best effort; it also expires after 30 days). */
-  const forgetServerConversation = () => {
+  /** Starts a new conversation and asks the server to forget the old one (it also expires after 30 days). */
+  const forgetServerConversation = async () => {
     const apiUrl = import.meta.env.VITE_MOVIE_API_URL as string | undefined
-    if (apiUrl && conversationId) void deleteAgentConversation(apiUrl, conversationId).catch(() => undefined)
+    const forgotten = conversationId
+    conversationGeneration.current += 1
     setConversationId(undefined)
+    if (!apiUrl || !forgotten) return
+    try {
+      await deleteAgentConversation(apiUrl, forgotten)
+    } catch {
+      setFeedbackNotice(locale === 'es'
+        ? 'No se pudo borrar la conversación del servidor; caduca en 30 días'
+        : 'The server could not forget this conversation; it expires within 30 days')
+    }
   }
 
   const runMayaLeoDemo = async () => {
@@ -708,13 +720,13 @@ function App() {
     setActiveMoods([])
     setMaxRuntime(undefined)
     setRankingMode('balanced')
-    forgetServerConversation()
+    void forgetServerConversation()
     await applyConstraintPrompt('English sci-fi, playful or twisty, under 100 minutes, something Maya and Leo can both enjoy', demoProfiles, cleanPreferences, undefined)
     document.querySelector('#decision')?.scrollIntoView({ behavior: 'smooth' })
   }
 
   const resetConversation = () => {
-    forgetServerConversation()
+    void forgetServerConversation()
     setConversationPreferences(createConversationPreferences())
     setConversationMessages([])
     setAgentExplanations({})
@@ -792,7 +804,7 @@ function App() {
 
   const deleteUserData = async () => {
     if (!window.confirm(locale === 'es' ? '¿Eliminar todos los perfiles, valoraciones y modelos locales?' : 'Delete all local profiles, ratings, and models?')) return
-    forgetServerConversation()
+    await forgetServerConversation()
     await clearAllLocalData()
     localStorage.removeItem('reel-circle-onboarding')
     setShowOnboarding(true)

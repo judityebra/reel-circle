@@ -1,14 +1,12 @@
 """Conversations remembered on the server (ADR 0002): preferences only, per conversation, for 30 days."""
 
-import asyncio
 import re
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
-from langgraph.checkpoint.memory import InMemorySaver
 
 from reel_circle_agent.api import app, clock
-from reel_circle_agent.conversations import ConversationStore
 
 MOVIES = [
     {
@@ -40,7 +38,7 @@ PERSONS = [
         "watched": [],
     }
 ]
-DAY_SECONDS = 24 * 60 * 60
+DAY_MS = 24 * 60 * 60 * 1000
 
 
 @pytest.fixture
@@ -52,8 +50,8 @@ def sqlite_conversations(tmp_path, monkeypatch):
 
 @pytest.fixture
 def frozen_clock():
-    now = {"seconds": 1_800_000_000.0}
-    app.dependency_overrides[clock] = lambda: now["seconds"]
+    now = {"ms": 1_800_000_000_000}
+    app.dependency_overrides[clock] = lambda: now["ms"]
     yield now
     app.dependency_overrides.pop(clock, None)
 
@@ -110,9 +108,9 @@ def test_messages_persons_and_the_candidate_pool_never_reach_storage(sqlite_conv
 def test_a_conversation_older_than_30_days_starts_fresh(frozen_clock):
     with TestClient(app) as client:
         conversation_id = _turn(client, "No horror tonight")["conversationId"]
-        frozen_clock["seconds"] += 29 * DAY_SECONDS
+        frozen_clock["ms"] += 29 * DAY_MS
         assert _turn(client, "Something funny", conversation_id)["preferences"]["excludedGenres"] == ["Horror"]
-        frozen_clock["seconds"] += 31 * DAY_SECONDS
+        frozen_clock["ms"] += 31 * DAY_MS
         body = _turn(client, "Something funny", conversation_id)
     assert body["preferences"]["excludedGenres"] == []
 
@@ -133,24 +131,19 @@ def test_malformed_conversation_ids_are_rejected(conversation_id):
         assert client.delete("/agent/conversations/has%20space").status_code == 400
 
 
-def test_the_sweep_deletes_every_conversation_idle_for_30_days():
-    saver = InMemorySaver()
-    store = ConversationStore(saver)
+def test_the_hourly_sweep_forgets_every_conversation_idle_for_30_days(sqlite_conversations, frozen_clock):
+    def stored_conversations() -> set[str]:
+        with sqlite3.connect(sqlite_conversations) as db:
+            return {row[0] for row in db.execute("SELECT DISTINCT thread_id FROM checkpoints")}
 
-    async def scenario():
-        from reel_circle_agent.graph import build_graph
-
-        agent = build_graph(saver)
-        for thread, last_turn in [("old", 0), ("recent", 25 * DAY_SECONDS * 1000)]:
-            config = {"configurable": {"thread_id": thread}}
-            values = {"preferences": {"excludedGenres": []}, "last_turn_at": last_turn}
-            await agent.aupdate_state(config, values, as_node="extract_preferences")
-        removed = await store.sweep(now_ms=31 * DAY_SECONDS * 1000)
-        remaining = {item.config["configurable"]["thread_id"] async for item in saver.alist(None)}
-        return removed, remaining
-
-    removed, remaining = asyncio.run(scenario())
-    assert removed == ["old"] and remaining == {"recent"}
+    with TestClient(app) as client:
+        idle = _turn(client, "No horror tonight")["conversationId"]
+        frozen_clock["ms"] += 2 * 60 * 60 * 1000
+        recent = _turn(client, "Something funny")["conversationId"]
+        assert stored_conversations() == {idle, recent}
+        frozen_clock["ms"] += 30 * DAY_MS
+        _turn(client, "Anything")  # a turn in another conversation triggers the sweep
+        assert idle not in stored_conversations() and recent in stored_conversations()
 
 
 def test_a_newer_browser_copy_wins_after_a_turn_the_service_missed(frozen_clock):
@@ -162,7 +155,7 @@ def test_a_newer_browser_copy_wins_after_a_turn_the_service_missed(frozen_clock)
             "excludedGenres": [],
             "platforms": [],
             "moods": [],
-            "lastUpdatedAt": int(frozen_clock["seconds"] * 1000) + 60_000,
+            "lastUpdatedAt": frozen_clock["ms"] + 60_000,
         }
         stale = {**newer, "excludedGenres": ["Comedy"], "lastUpdatedAt": 0}
         assert _turn(client, "Anything", conversation_id, preferences=newer)["preferences"]["excludedGenres"] == []

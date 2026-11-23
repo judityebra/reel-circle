@@ -1,8 +1,9 @@
 """Server-side conversation state (ADR 0002): one LangGraph thread per conversation.
 
 The checkpointer keeps only the graph's tracked state, which is the typed preferences and the time
-of the last turn; everything per-turn (message, persons, candidate pool, intermediate results) is
-an untracked channel and never written. Conversations idle for 30 days are forgotten.
+of the last turn; the turn's input travels in the run config and intermediate results are untracked
+channels, so neither is ever written. Turns run with `durability="exit"`: one checkpoint per run.
+Conversations idle for 30 days are forgotten when next used and by an hourly sweep.
 
 CHECKPOINT_DATABASE_URL picks the storage:
 - unset: in memory (lost on restart; fine for development and tests)
@@ -34,12 +35,27 @@ async def open_checkpointer(url: str | None) -> AsyncIterator[BaseCheckpointSave
             yield saver
     elif url.startswith(("postgres://", "postgresql://")):
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from psycopg.rows import dict_row
+        from psycopg_pool import AsyncConnectionPool
 
-        async with AsyncPostgresSaver.from_conn_string(url) as saver:
+        # A pool that checks connections before use: hosted Postgres (Neon, Supabase) drops idle
+        # connections. No prepared statements, so it also works behind pgbouncer.
+        options = {"autocommit": True, "prepare_threshold": None, "row_factory": dict_row}
+        async with AsyncConnectionPool(
+            url, kwargs=options, min_size=1, max_size=10, check=AsyncConnectionPool.check_connection, open=False
+        ) as pool:
+            saver = AsyncPostgresSaver(pool)
             await saver.setup()
             yield saver
     else:
         raise ValueError("CHECKPOINT_DATABASE_URL must start with sqlite:/// or postgresql://")
+
+
+def remembered_conversations(saver: BaseCheckpointSaver):
+    """The recommendation agent compiled with this checkpointer, and expiry for its conversations."""
+    from .graph import build_graph
+
+    return build_graph(saver), ConversationStore(saver)
 
 
 def is_conversation_id(value: object) -> bool:
@@ -66,8 +82,9 @@ class ConversationStore:
     async def delete(self, conversation_id: str) -> None:
         await self.saver.adelete_thread(conversation_id)
 
-    async def sweep(self, now_ms: int) -> list[str]:
-        """Deletes every conversation idle for 30 days; returns their ids."""
+    async def sweep(self, now_ms: int) -> None:
+        """Deletes every conversation idle for 30 days. It reads every checkpoint, so it runs at most hourly;
+        with one checkpoint per run (`durability="exit"`) that stays small at this app's scale."""
         latest_turns: dict[str, int] = {}
         async for item in self.saver.alist(None):
             thread = item.config["configurable"]["thread_id"]
@@ -76,7 +93,6 @@ class ConversationStore:
         idle = [thread for thread, last_turn in latest_turns.items() if now_ms - last_turn > MAX_IDLE_MS]
         for thread in idle:
             await self.delete(thread)
-        return idle
 
     async def sweep_hourly(self, now_ms: int) -> None:
         """Runs the sweep at most once an hour, from the request path (no background worker needed)."""

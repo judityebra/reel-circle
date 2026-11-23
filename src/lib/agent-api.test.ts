@@ -143,4 +143,9 @@ describe('agent API', () => {
     expect(calls[0][1].method).toBe('DELETE')
     expect(JSON.parse(String(calls[0][1].body))).toEqual({ conversationId: 'conv-1' })
   })
+
+  it('reports a conversation the server could not forget', async () => {
+    const fetcher = async () => ({ ok: false, status: 502, json: async () => ({}) })
+    await expect(deleteAgentConversation('/api', 'conv-1', fetcher)).rejects.toThrow('502')
+  })
 })

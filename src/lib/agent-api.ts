@@ -16,7 +16,7 @@ export type AgentServiceInfo =
   | { mode: 'typescript-fallback'; fallbackReason: AgentServiceFallbackReason }
 
 export interface AgentApiResponse {
-  /** Set by the Python recommendation agent: send it back to continue the same remembered conversation. */
+  /** The server-side conversation: send it back to continue the same remembered conversation. */
   conversationId?: string
   preferences: ConversationPreferences
   recommendations: Array<{
@@ -50,6 +50,8 @@ export interface AgentApiResponse {
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'status' | 'json'>>
 
+const agentUrl = (baseUrl: string) => `${baseUrl.replace(/\/$/, '')}/agent`
+
 interface AgentTurnOptions {
   conversationId?: string
   fetcher?: Fetcher
@@ -63,7 +65,7 @@ export async function requestAgentTurn(
   profiles: Profile[],
   { conversationId, fetcher = fetch }: AgentTurnOptions = {},
 ): Promise<AgentApiResponse> {
-  const response = await fetcher(`${baseUrl.replace(/\/$/, '')}/agent`, {
+  const response = await fetcher(agentUrl(baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -92,11 +94,12 @@ export async function requestAgentTurn(
   return payload
 }
 
-/** Asks the server to forget a remembered conversation (best effort: used by Delete data and reset). */
+/** Asks the server to forget a remembered conversation; throws if it could not (Delete data reports that). */
 export async function deleteAgentConversation(baseUrl: string, conversationId: string, fetcher: Fetcher = fetch): Promise<void> {
-  await fetcher(`${baseUrl.replace(/\/$/, '')}/agent`, {
+  const response = await fetcher(agentUrl(baseUrl), {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversationId }),
   })
+  if (!response.ok) throw new Error(`Agent service could not forget the conversation (${response.status})`)
 }

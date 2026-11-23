@@ -1452,6 +1452,7 @@ dependencies = [
     { name = "langgraph-checkpoint-sqlite" },
     { name = "langsmith" },
     { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg-pool" },
     { name = "pydantic" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1477,6 +1478,7 @@ requires-dist = [
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.1.3" },
     { name = "langsmith", specifier = ">=0.4" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.9" },
+    { name = "psycopg-pool", specifier = ">=3.3.3" },
     { name = "pydantic", specifier = ">=2.8" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]

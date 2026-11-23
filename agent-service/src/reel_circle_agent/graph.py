@@ -106,8 +106,7 @@ def _latest_preferences(stored: Preferences | None, sent: Preferences | None) ->
 
 async def extract_preferences(state: TurnState, config: RunnableConfig) -> NodeResult:
     """Model extraction when a chat model is configured; deterministic rules otherwise or when it fails."""
-    now = config["configurable"].get("now_ms") or int(time.time() * 1000)
-    # The conversation's stored preferences win; the browser's copy covers a new or forgotten conversation.
+    now = config["configurable"]["now_ms"]
     turn = _turn(config)
     current = _latest_preferences(state.get("preferences"), turn["incoming_preferences"]) or (
         create_conversation_preferences(now)
@@ -118,18 +117,16 @@ async def extract_preferences(state: TurnState, config: RunnableConfig) -> NodeR
     )
     if outcome.extracted is not None:
         update = {
-            "last_turn_at": now,
             "preferences": merge_model_extraction(current, outcome.extracted, now),
             "extraction": {"mode": "model", "status": outcome.status},
             "clarifying_question": outcome.extracted["clarificationQuestion"],
         }
-        return update, "completed", "model structured extraction"
+        return {**update, "last_turn_at": now}, "completed", "model structured extraction"
     update = {
-        "last_turn_at": now,
         "preferences": update_conversation_preferences(current, turn["message"], now),
         "extraction": {"mode": "deterministic", "status": outcome.status, "error": outcome.error},
     }
-    return update, "completed", "deterministic structured extraction"
+    return {**update, "last_turn_at": now}, "completed", "deterministic structured extraction"
 
 
 async def filter_candidates(state: TurnState, config: RunnableConfig) -> NodeResult:

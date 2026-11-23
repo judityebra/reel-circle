@@ -221,6 +221,9 @@ export default async function handler(request: ServerlessRequest, response: Serv
   if (request.method !== 'POST') return response.status(405).json({ error: 'Method not allowed' })
   const input = parseRequest(request.body)
   if (!input) return response.status(400).json({ error: 'A message of 1-1000 characters is required' })
+  if (isRecord(request.body) && request.body.conversationId !== undefined && !input.conversationId) {
+    return response.status(400).json({ error: 'Invalid request' })
+  }
 
   response.setHeader('Cache-Control', 'no-store')
   const serviceUrl = process.env.AGENT_SERVICE_URL
