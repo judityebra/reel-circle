@@ -12,8 +12,8 @@ extract -> filter -> semantic -> rank -> validate
 
 Today the graph is linear: preference extraction (a chat model, or rules), the six hard
 constraints, group scoring, semantic retrieval, and a validate guardrail that drops any movie
-breaking a hard constraint. Pauses and server-side conversation state arrive in later tickets (see
-issue #2).
+breaking a hard constraint. Conversations are remembered per `conversationId`. Pauses arrive in
+later tickets (see issue #2).
 
 ## Model extraction
 
@@ -35,6 +35,26 @@ budget, which stays below the TypeScript proxy's 4-second timeout. After that, o
 error, the turn falls back to rule-based extraction and reports `modelStatus: "failed"` with a
 `modelError`: `http-<status>`, `timeout`, `invalid-json`, `request-error` or
 `configuration-error` (a model that can't be built, for example a missing API key).
+
+## Conversations
+
+Each response carries a `conversationId`; sending it back continues the same conversation, so
+earlier exclusions hold without the browser resending its preferences. Following
+[ADR 0002](../docs/adr/0002-server-state-holds-preferences-only.md), only the typed preferences and
+the time of the last turn are stored. The turn's input travels in the LangGraph run config and
+intermediate results are untracked channels, so the message, persons and candidate pool never
+reach storage (a test reads the raw SQLite file to prove it).
+
+| `CHECKPOINT_DATABASE_URL` | Storage |
+| --- | --- |
+| unset | In memory, lost on restart |
+| `sqlite:///path/to/conversations.db` | A local file |
+| `postgresql://...` | Postgres through a connection pool (Neon, Supabase; works behind pgbouncer) |
+
+Conversations idle for 30 days are forgotten the next time they are used and by an hourly sweep.
+`DELETE /agent/conversations/{id}` forgets one; the app calls it on reset and Delete data. If a
+turn was answered by the TypeScript fallback, the browser's copy of the preferences is newer and
+wins on the next turn.
 
 ## Semantic retrieval
 

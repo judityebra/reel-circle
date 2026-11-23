@@ -16,6 +16,8 @@ export type AgentServiceInfo =
   | { mode: 'typescript-fallback'; fallbackReason: AgentServiceFallbackReason }
 
 export interface AgentApiResponse {
+  /** The server-side conversation: send it back to continue the same remembered conversation. */
+  conversationId?: string
   preferences: ConversationPreferences
   recommendations: Array<{
     movie: Movie
@@ -48,19 +50,27 @@ export interface AgentApiResponse {
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'status' | 'json'>>
 
+const agentUrl = (baseUrl: string) => `${baseUrl.replace(/\/$/, '')}/agent`
+
+interface AgentTurnOptions {
+  conversationId?: string
+  fetcher?: Fetcher
+}
+
 export async function requestAgentTurn(
   baseUrl: string,
   message: string,
   preferences: ConversationPreferences,
   candidates: Movie[],
   profiles: Profile[],
-  fetcher: Fetcher = fetch,
+  { conversationId, fetcher = fetch }: AgentTurnOptions = {},
 ): Promise<AgentApiResponse> {
-  const response = await fetcher(`${baseUrl.replace(/\/$/, '')}/agent`, {
+  const response = await fetcher(agentUrl(baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       message,
+      conversationId,
       preferences,
       candidates: candidates.slice(0, 250),
       profiles: profiles.slice(0, 12).map(({ id, name, color, preferredGenres, tasteWeights, featureWeights }) => ({
@@ -82,4 +92,14 @@ export async function requestAgentTurn(
     throw new Error('Agent service returned invalid data')
   }
   return payload
+}
+
+/** Asks the server to forget a remembered conversation; throws if it could not (Delete data reports that). */
+export async function deleteAgentConversation(baseUrl: string, conversationId: string, fetcher: Fetcher = fetch): Promise<void> {
+  const response = await fetcher(agentUrl(baseUrl), {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversationId }),
+  })
+  if (!response.ok) throw new Error(`Agent service could not forget the conversation (${response.status})`)
 }

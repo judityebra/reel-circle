@@ -52,6 +52,12 @@ describe('session persistence', () => {
     expect(shared.profiles[0]).not.toHaveProperty('ratings')
     expect(shared.profiles[0]).not.toHaveProperty('watched')
   })
+
+  it('never puts the conversation id in a room link', () => {
+    const encoded = encodeSharedRoom({ ...snapshot, conversationId: 'conv-secret-1' })
+    expect(JSON.stringify(decodeSharedRoom(encoded))).not.toContain('conv-secret-1')
+    expect(encoded).not.toContain('conv-secret-1')
+  })
 })
 
 describe('catalog cache', () => {
