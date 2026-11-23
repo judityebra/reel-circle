@@ -11,7 +11,8 @@
     "test:e2e": "playwright test",
     "preview": "vite preview",
     "eval:recs": "tsx eval/recs.ts",
-    "eval:extraction": "tsx eval/extraction.ts"
+    "eval:extraction": "tsx eval/extraction.ts",
+    "fixtures:parity": "tsx eval/export-parity-fixtures.ts"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",
