@@ -4,23 +4,25 @@
         -> validate_results -> respond
 
 Node names are the trace tool names the browser already knows. The graph is linear for now;
-pauses (clarifying questions, relaxations) and server-side conversation
-state arrive in later tickets as conditional edges and a checkpointer on
-this same graph. The run config carries the outside world: the `http_client` for the embedding
+pauses (clarifying questions, relaxations) arrive in later tickets as conditional edges on this
+same graph. The run config carries the outside world: the `http_client` for the embedding
 provider and Qdrant, and the `chat_model` and `model_retry` policy for extraction, so callers and
 tests choose them. Every node except `respond` appends one step
 to the response trace, so the trace shows what actually ran.
 
-ADR 0002: `message`, `persons` and `candidate_pool` are per-turn input. When a checkpointer is
-added, they must stay out of the persisted state.
+ADR 0002: with a checkpointer, only `preferences` and `last_turn_at` are persisted per
+conversation. The turn's input (message, persons, candidate pool) travels in the run config as
+`turn`, because LangGraph checkpoints the graph input itself; intermediate results are
+`UntrackedValue` channels that live for one run. Neither is ever written to storage.
 """
 
-import operator
 import time
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.runnables import RunnableConfig
+from langgraph.channels.untracked_value import UntrackedValue
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
 from .model_extraction import DEFAULT_RETRY_POLICY, extract_with_model, merge_model_extraction
@@ -39,7 +41,7 @@ class TraceStep(TypedDict):
 
 
 class TurnInput(TypedDict):
-    """Per-turn input, as the browser sent it."""
+    """Per-turn input, as the browser sent it. Passed in the run config, never as graph state."""
 
     message: str
     incoming_preferences: Preferences | None
@@ -49,18 +51,25 @@ class TurnInput(TypedDict):
     started_at: float
 
 
-class TurnState(TurnInput):
-    """The input plus what the nodes build up; each node reads only keys earlier nodes have set."""
+def _turn(config: RunnableConfig) -> TurnInput:
+    return config["configurable"]["turn"]
 
+
+class TurnState(TypedDict, total=False):
+    """What the nodes build up; each node reads only keys earlier nodes have set."""
+
+    # Persisted per conversation.
     preferences: Preferences
-    extraction: dict[str, Any]
-    clarifying_question: str | None
-    ranked: list[Recommendation]
-    candidates_meeting_constraints: int
-    semantic: dict[str, Any]
-    recommendations: list[dict[str, Any]]
-    trace: Annotated[list[TraceStep], operator.add]
-    response: dict[str, Any]
+    last_turn_at: int
+    # Per run only.
+    extraction: Annotated[dict[str, Any], UntrackedValue]
+    clarifying_question: Annotated[str | None, UntrackedValue]
+    ranked: Annotated[list[Recommendation], UntrackedValue]
+    candidates_meeting_constraints: Annotated[int, UntrackedValue]
+    semantic: Annotated[dict[str, Any], UntrackedValue]
+    recommendations: Annotated[list[dict[str, Any]], UntrackedValue]
+    trace: Annotated[list[TraceStep], UntrackedValue]
+    response: Annotated[dict[str, Any], UntrackedValue]
 
 
 NodeResult = tuple[dict[str, Any], StepStatus, str]
@@ -81,44 +90,59 @@ def _traced(node: TracedNode) -> Callable[[TurnState, RunnableConfig], Awaitable
         update, status, observation = await node(state, config)
         duration = round((time.perf_counter() - started) * 1000)
         step: TraceStep = {"tool": node.__name__, "status": status, "durationMs": duration, "observation": observation}
-        return {**update, "trace": [step]}
+        return {**update, "trace": [*state.get("trace", []), step]}
 
     run.__name__ = node.__name__
     return run
 
 
+def _latest_preferences(stored: Preferences | None, sent: Preferences | None) -> Preferences | None:
+    """The conversation's stored preferences, unless the browser's copy is newer (a turn the service
+    missed because the TypeScript fallback answered it). Without a browser copy, the stored one wins."""
+    if stored and sent and (sent.get("lastUpdatedAt") or 0) > (stored.get("lastUpdatedAt") or 0):
+        return sent
+    return stored or sent
+
+
 async def extract_preferences(state: TurnState, config: RunnableConfig) -> NodeResult:
     """Model extraction when a chat model is configured; deterministic rules otherwise or when it fails."""
-    now = int(time.time() * 1000)
-    current = state.get("incoming_preferences") or create_conversation_preferences(now)
+    now = config["configurable"].get("now_ms") or int(time.time() * 1000)
+    # The conversation's stored preferences win; the browser's copy covers a new or forgotten conversation.
+    turn = _turn(config)
+    current = _latest_preferences(state.get("preferences"), turn["incoming_preferences"]) or (
+        create_conversation_preferences(now)
+    )
     settings = config["configurable"]
     outcome = await extract_with_model(
-        settings.get("chat_model"), state["message"], current, settings.get("model_retry", DEFAULT_RETRY_POLICY)
+        settings.get("chat_model"), turn["message"], current, settings.get("model_retry", DEFAULT_RETRY_POLICY)
     )
     if outcome.extracted is not None:
         update = {
+            "last_turn_at": now,
             "preferences": merge_model_extraction(current, outcome.extracted, now),
             "extraction": {"mode": "model", "status": outcome.status},
             "clarifying_question": outcome.extracted["clarificationQuestion"],
         }
         return update, "completed", "model structured extraction"
     update = {
-        "preferences": update_conversation_preferences(current, state["message"], now),
+        "last_turn_at": now,
+        "preferences": update_conversation_preferences(current, turn["message"], now),
         "extraction": {"mode": "deterministic", "status": outcome.status, "error": outcome.error},
     }
     return update, "completed", "deterministic structured extraction"
 
 
 async def filter_candidates(state: TurnState, config: RunnableConfig) -> NodeResult:
-    pool = state["candidate_pool"]
-    ranked = score_candidates(pool, state["persons"], state["preferences"])
+    turn = _turn(config)
+    pool = turn["candidate_pool"]
+    ranked = score_candidates(pool, turn["persons"], state["preferences"])
     update = {"ranked": ranked, "candidates_meeting_constraints": len(ranked)}
     return update, _status(bool(pool)), f"{len(ranked)}/{len(pool)} candidates satisfy hard constraints"
 
 
 async def semantic_retrieval(state: TurnState, config: RunnableConfig) -> NodeResult:
     ranked = state["ranked"]
-    result = await retrieve_semantically(state["message"], ranked, config["configurable"]["http_client"])
+    result = await retrieve_semantically(_turn(config)["message"], ranked, config["configurable"]["http_client"])
     matches = sum(1 for recommendation in result["recommendations"] if recommendation["semanticScore"] > 0)
     source = f"{result['retrievalMode']} · {result['embeddingModel']} · {result['dimensions']}d"
     update = {"ranked": result["recommendations"], "semantic": result}
@@ -139,7 +163,8 @@ def _shortlist_entry(recommendation: Recommendation, preferences: Preferences) -
 
 
 async def rank_candidates(state: TurnState, config: RunnableConfig) -> NodeResult:
-    shortlist = [_shortlist_entry(item, state["preferences"]) for item in state["ranked"][: state["limit"]]]
+    limit = _turn(config)["limit"]
+    shortlist = [_shortlist_entry(item, state["preferences"]) for item in state["ranked"][:limit]]
     return {"recommendations": shortlist}, _status(bool(shortlist)), f"{len(shortlist)} recommendations returned"
 
 
@@ -159,7 +184,7 @@ async def validate_results(state: TurnState, config: RunnableConfig) -> NodeResu
     return {"recommendations": kept}, "completed", observation
 
 
-def respond(state: TurnState) -> dict[str, Any]:
+def respond(state: TurnState, config: RunnableConfig) -> dict[str, Any]:
     """Assembles the response in the shape the browser's agent client expects."""
     semantic, extraction = state["semantic"], state["extraction"]
     meta = {
@@ -172,7 +197,7 @@ def respond(state: TurnState) -> dict[str, Any]:
             for key in ("retrievalMode", "embeddingMode", "embeddingModel", "dimensions", "fallbackReason")
             if key in semantic
         },
-        "durationMs": round((time.perf_counter() - state["started_at"]) * 1000),
+        "durationMs": round((time.perf_counter() - _turn(config)["started_at"]) * 1000),
         "trace": state["trace"],
     }
     response = {
@@ -185,7 +210,8 @@ def respond(state: TurnState) -> dict[str, Any]:
     return {"response": {key: value for key, value in response.items() if value is not None}}
 
 
-def build_graph():
+def build_graph(checkpointer: BaseCheckpointSaver | None = None):
+    """The recommendation agent; with a checkpointer, each `thread_id` is one remembered conversation."""
     graph = StateGraph(TurnState)
     steps = [extract_preferences, filter_candidates, semantic_retrieval, rank_candidates, validate_results]
     for step in steps:
@@ -196,7 +222,4 @@ def build_graph():
         graph.add_edge(current.__name__, following.__name__)
     graph.add_edge(steps[-1].__name__, "respond")
     graph.add_edge("respond", END)
-    return graph.compile()
-
-
-recommendation_agent = build_graph()
+    return graph.compile(checkpointer=checkpointer)

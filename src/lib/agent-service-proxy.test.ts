@@ -144,3 +144,56 @@ describe('recommendation agent proxy to the Python service', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 })
+
+describe('conversations remembered by the Python service', () => {
+  it('forwards the conversation id and keeps it when the TypeScript fallback answers', async () => {
+    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
+    const fetcher = vi.fn(async () => jsonResponse(503, {}))
+    vi.stubGlobal('fetch', fetcher)
+    const { body } = await callRecommendationAgent({ ...turn, conversationId: 'conv-123' })
+    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(init.body as string).conversationId).toBe('conv-123')
+    expect((body as unknown as { conversationId?: string }).conversationId).toBe('conv-123')
+  })
+
+  it('drops a malformed conversation id instead of forwarding it', async () => {
+    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
+    const fetcher = vi.fn(async () => jsonResponse(200, pythonPayload))
+    vi.stubGlobal('fetch', fetcher)
+    await callRecommendationAgent({ ...turn, conversationId: '../../etc/passwd' })
+    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(init.body as string).conversationId).toBeUndefined()
+  })
+
+  it('asks the Python service to forget a conversation', async () => {
+    process.env.AGENT_SERVICE_URL = 'https://agent.example.test/'
+    const fetcher = vi.fn(async () => ({ ok: true, status: 204, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetcher)
+    const captured: Captured = { status: 0, body: { recommendations: [], meta: {} }, headers: {} }
+    const response = {
+      status(code: number) { captured.status = code; return response },
+      json(payload: unknown) { captured.body = payload as AgentBody },
+      setHeader() {},
+    }
+    await handler({ method: 'DELETE', body: { conversationId: 'conv-123' } }, response)
+    expect(captured.status).toBe(200)
+    expect(captured.body).toEqual({ deleted: true })
+    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://agent.example.test/agent/conversations/conv-123')
+    expect(init.method).toBe('DELETE')
+  })
+
+  it('has nothing to forget without a Python service', async () => {
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    const captured: { status: number; body: unknown } = { status: 0, body: undefined }
+    const response = {
+      status(code: number) { captured.status = code; return response },
+      json(payload: unknown) { captured.body = payload },
+      setHeader() {},
+    }
+    await handler({ method: 'DELETE', body: { conversationId: 'conv-123' } }, response)
+    expect(captured).toEqual({ status: 200, body: { deleted: false } })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+})

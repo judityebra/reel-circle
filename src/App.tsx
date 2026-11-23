@@ -3,7 +3,7 @@ import { Background, Controls, ReactFlow, useNodesState, type Edge, type Node } 
 import '@xyflow/react/dist/style.css'
 import { Activity, BarChart3, Bot, BrainCircuit, Check, CheckCircle2, ChevronRight, Clock3, Copy, Cpu, Database, Download, Film, FlaskConical, GitCompareArrows, Heart, Layers3, LoaderCircle, MessageSquareText, MonitorPlay, Moon, Network, Play, Plus, Route, RotateCcw, Search, Share2, ShieldCheck, Shuffle, Sparkles, Sun, Target, Thermometer, ThumbsDown, Trash2, Upload, Users, X } from 'lucide-react'
 import { catalog as demoCatalog, demoProfiles, profileColors } from './data'
-import { requestAgentTurn, type AgentApiResponse } from './lib/agent-api'
+import { deleteAgentConversation, requestAgentTurn, type AgentApiResponse } from './lib/agent-api'
 import { evaluateAgentTrace, scoreAgentRun } from './lib/agent-evaluation'
 import { createConversationPreferences, describeConstraints, parseConstraintPrompt, updateConversationPreferences, type ConversationPreferences } from './lib/constraints'
 import { runDecisionAgent, type AgentTraceEntry } from './lib/decision-agent'
@@ -70,6 +70,7 @@ function App() {
   const [promptInterpretation, setPromptInterpretation] = useState<string[] | null>(null)
   const [conversationPreferences, setConversationPreferences] = useState<ConversationPreferences>(() => createConversationPreferences())
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([])
+  const [conversationId, setConversationId] = useState<string | undefined>()
   const [conversationStatus, setConversationStatus] = useState<'idle' | 'thinking'>('idle')
   const [agentExplanations, setAgentExplanations] = useState<Record<string, string>>({})
   const [latestAgentMeta, setLatestAgentMeta] = useState<AgentApiResponse['meta'] | null>(null)
@@ -268,6 +269,7 @@ function App() {
             setAgentTrace(stored.agentTrace ?? [])
             setConversationPreferences(stored.conversationPreferences ?? createConversationPreferences())
             setConversationMessages(stored.conversationMessages ?? [])
+            setConversationId(stored.conversationId)
             setRestoredPositions(stored.nodePositions)
           } else {
             setProfiles(demoProfiles)
@@ -332,8 +334,8 @@ function App() {
 
   useEffect(() => {
     if (!hydrated) return
-    void saveSession({ profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, rankingMode, activeProfileId, nodePositions: restoredPositions, feedbackEvents, neuralResults, graphNeuralResults, experiments, agentTrace, conversationPreferences, conversationMessages })
-  }, [hydrated, profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, rankingMode, activeProfileId, restoredPositions, feedbackEvents, neuralResults, graphNeuralResults, experiments, agentTrace, conversationPreferences, conversationMessages])
+    void saveSession({ profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, rankingMode, activeProfileId, nodePositions: restoredPositions, feedbackEvents, neuralResults, graphNeuralResults, experiments, agentTrace, conversationPreferences, conversationMessages, conversationId })
+  }, [hydrated, profiles, maxRuntime, activeGenres, activePlatforms, activeMoods, rankingMode, activeProfileId, restoredPositions, feedbackEvents, neuralResults, graphNeuralResults, experiments, agentTrace, conversationPreferences, conversationMessages, conversationId])
 
   useEffect(() => {
     if (!tasteQuestion) return
@@ -630,6 +632,7 @@ function App() {
     suggestedPrompt?: string,
     turnProfiles = profiles,
     startingPreferences = conversationPreferences,
+    activeConversationId = conversationId,
   ) => {
     const prompt = suggestedPrompt ?? constraintPrompt
     if (!prompt.trim() || conversationStatus === 'thinking') return
@@ -640,8 +643,9 @@ function App() {
     let selectedMovieId: string | undefined
     if (apiUrl) {
       try {
-        const result = await requestAgentTurn(apiUrl, prompt, startingPreferences, movieCatalog, turnProfiles)
+        const result = await requestAgentTurn(apiUrl, prompt, startingPreferences, movieCatalog, turnProfiles, { conversationId: activeConversationId })
         next = result.preferences
+        setConversationId(result.conversationId)
         setLatestAgentMeta(result.meta)
         selectedMovieId = result.recommendations[0]?.movie.id
         setAgentExplanations(Object.fromEntries(result.recommendations.map(({ movie, explanation }) => [movie.id, explanation])))
@@ -683,6 +687,13 @@ function App() {
     setConversationStatus('idle')
   }
 
+  /** Starts a new conversation: the server forgets the old one (best effort; it also expires after 30 days). */
+  const forgetServerConversation = () => {
+    const apiUrl = import.meta.env.VITE_MOVIE_API_URL as string | undefined
+    if (apiUrl && conversationId) void deleteAgentConversation(apiUrl, conversationId).catch(() => undefined)
+    setConversationId(undefined)
+  }
+
   const runMayaLeoDemo = async () => {
     const cleanPreferences = createConversationPreferences()
     setProfiles(demoProfiles)
@@ -697,11 +708,13 @@ function App() {
     setActiveMoods([])
     setMaxRuntime(undefined)
     setRankingMode('balanced')
-    await applyConstraintPrompt('English sci-fi, playful or twisty, under 100 minutes, something Maya and Leo can both enjoy', demoProfiles, cleanPreferences)
+    forgetServerConversation()
+    await applyConstraintPrompt('English sci-fi, playful or twisty, under 100 minutes, something Maya and Leo can both enjoy', demoProfiles, cleanPreferences, undefined)
     document.querySelector('#decision')?.scrollIntoView({ behavior: 'smooth' })
   }
 
   const resetConversation = () => {
+    forgetServerConversation()
     setConversationPreferences(createConversationPreferences())
     setConversationMessages([])
     setAgentExplanations({})
@@ -779,6 +792,7 @@ function App() {
 
   const deleteUserData = async () => {
     if (!window.confirm(locale === 'es' ? '¿Eliminar todos los perfiles, valoraciones y modelos locales?' : 'Delete all local profiles, ratings, and models?')) return
+    forgetServerConversation()
     await clearAllLocalData()
     localStorage.removeItem('reel-circle-onboarding')
     setShowOnboarding(true)

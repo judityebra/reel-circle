@@ -38,6 +38,8 @@ export interface SessionSnapshot {
   agentTrace?: AgentTraceEntry[]
   conversationPreferences?: ConversationPreferences
   conversationMessages?: ConversationMessage[]
+  /** The server-side conversation (Python agent), if any; never shared in room links. */
+  conversationId?: string
 }
 
 type SharedProfile = Pick<Profile, 'id' | 'name' | 'color' | 'preferredGenres' | 'tasteWeights' | 'featureWeights'>

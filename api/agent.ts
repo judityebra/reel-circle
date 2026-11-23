@@ -16,6 +16,7 @@ interface ServerlessResponse {
 
 interface AgentRequest {
   message: string
+  conversationId?: string
   preferences?: ConversationPreferences
   candidates?: Movie[]
   profiles?: Profile[]
@@ -50,12 +51,15 @@ const stringList = (value: unknown, allowed?: string[]) => Array.isArray(value)
   ? [...new Set(value.filter((item): item is string => typeof item === 'string' && (!allowed || allowed.includes(item))))]
   : []
 
+const isConversationId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value)
+
 function parseRequest(body: unknown): AgentRequest | undefined {
   if (!isRecord(body) || typeof body.message !== 'string') return undefined
   const message = body.message.trim()
   if (!message || message.length > 1_000) return undefined
   return {
     message,
+    conversationId: isConversationId(body.conversationId) ? body.conversationId : undefined,
     preferences: isRecord(body.preferences) ? body.preferences as unknown as ConversationPreferences : undefined,
     candidates: Array.isArray(body.candidates) ? body.candidates.slice(0, 250) as Movie[] : [],
     profiles: Array.isArray(body.profiles) ? body.profiles.slice(0, 12) as Profile[] : [],
@@ -195,7 +199,25 @@ async function askAgentService(serviceUrl: string, input: AgentRequest): Promise
 const withAgentService = (payload: AgentApiResponse, agentService: AgentServiceInfo): AgentApiResponse =>
   ({ ...payload, meta: { ...payload.meta, agentService } })
 
+/** Asks the Python service to forget a conversation; without a service there is nothing to forget. */
+async function forgetConversation(body: unknown, response: ServerlessResponse) {
+  const conversationId = isRecord(body) ? body.conversationId : undefined
+  if (!isConversationId(conversationId)) return response.status(400).json({ error: 'A valid conversationId is required' })
+  const serviceUrl = process.env.AGENT_SERVICE_URL
+  if (!serviceUrl) return response.status(200).json({ deleted: false })
+  try {
+    const forgotten = await fetch(`${serviceUrl.replace(/\/$/, '')}/agent/conversations/${conversationId}`, {
+      method: 'DELETE',
+      signal: AbortSignal.timeout(agentServiceTimeoutMs()),
+    })
+    return forgotten.ok ? response.status(200).json({ deleted: true }) : response.status(502).json({ error: 'Agent service could not delete the conversation' })
+  } catch {
+    return response.status(502).json({ error: 'Agent service unavailable' })
+  }
+}
+
 export default async function handler(request: ServerlessRequest, response: ServerlessResponse) {
+  if (request.method === 'DELETE') return forgetConversation(request.body, response)
   if (request.method !== 'POST') return response.status(405).json({ error: 'Method not allowed' })
   const input = parseRequest(request.body)
   if (!input) return response.status(400).json({ error: 'A message of 1-1000 characters is required' })
@@ -206,7 +228,9 @@ export default async function handler(request: ServerlessRequest, response: Serv
 
   const outcome = await askAgentService(serviceUrl, input)
   if (outcome.mode === 'python') return response.status(200).json(withAgentService(outcome.payload, { mode: 'python' }))
-  return response.status(200).json(withAgentService(await runTypeScriptAgent(input), outcome))
+  // Keep the conversation id so the next turn reaches the same remembered conversation once the service is back.
+  const fallback = { ...await runTypeScriptAgent(input), conversationId: input.conversationId }
+  return response.status(200).json(withAgentService(fallback, outcome))
 }
 
 /** The TypeScript recommendation agent: used without a service URL, and as the fallback when the service fails. */

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import handler from '../../api/agent'
-import { requestAgentTurn } from './agent-api'
+import { deleteAgentConversation, requestAgentTurn } from './agent-api'
 import { createConversationPreferences } from './constraints'
 import type { Movie } from './recommendation'
 
@@ -110,10 +110,37 @@ describe('agent API', () => {
       ratings: [{ title: 'Secret rating', rating: 5 }], watched: [{ title: 'Secret watch' }],
     }
 
-    await requestAgentTurn('/api', 'Something gentle', createConversationPreferences(), candidates, [privateProfile], fetcher)
+    await requestAgentTurn('/api', 'Something gentle', createConversationPreferences(), candidates, [privateProfile], { fetcher })
 
     expect(requestBody).not.toContain('Secret rating')
     expect(requestBody).not.toContain('Secret watch')
     expect(JSON.parse(requestBody).profiles[0]).toMatchObject({ ratings: [], watched: [] })
+  })
+
+  it('sends the conversation id so the server remembers the conversation', async () => {
+    let requestBody = ''
+    const fetcher = async (_input: string, init: RequestInit) => {
+      requestBody = String(init.body)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ conversationId: 'conv-1', preferences: createConversationPreferences(), recommendations: [], meta: { extractionMode: 'deterministic', durationMs: 1, trace: [] } }),
+      }
+    }
+    const result = await requestAgentTurn('/api', 'Something gentle', createConversationPreferences(), candidates, [], { conversationId: 'conv-1', fetcher })
+    expect(JSON.parse(requestBody).conversationId).toBe('conv-1')
+    expect(result.conversationId).toBe('conv-1')
+  })
+
+  it('asks the server to forget a conversation', async () => {
+    const calls: Array<[string, RequestInit]> = []
+    const fetcher = async (input: string, init: RequestInit) => {
+      calls.push([input, init])
+      return { ok: true, status: 200, json: async () => ({ deleted: true }) }
+    }
+    await deleteAgentConversation('/api/', 'conv-1', fetcher)
+    expect(calls[0][0]).toBe('/api/agent')
+    expect(calls[0][1].method).toBe('DELETE')
+    expect(JSON.parse(String(calls[0][1].body))).toEqual({ conversationId: 'conv-1' })
   })
 })

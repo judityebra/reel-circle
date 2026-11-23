@@ -1,32 +1,77 @@
 """HTTP API of the recommendation agent: the same request and response shape as the TypeScript `/api/agent`.
 
-Model extraction is configured with AGENT_MODEL or OPENAI_API_KEY (see model_extraction.py).
+Model extraction is configured with AGENT_MODEL or OPENAI_API_KEY (see model_extraction.py), and
+conversation storage with CHECKPOINT_DATABASE_URL (see conversations.py).
 LangSmith tracing is off unless LANGSMITH_TRACING=true and LANGSMITH_API_KEY are set; LangGraph
 then traces every node of every turn.
 """
 
 import json
 import math
+import os
 import ssl
 import time
+import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from functools import lru_cache
 from typing import Annotated, Any
 
 import certifi
 import httpx
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from langchain_core.language_models import BaseChatModel
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph.state import CompiledStateGraph
 
-from .graph import TurnInput, recommendation_agent
+from .conversations import ConversationStore, is_conversation_id, open_checkpointer
+from .graph import TurnInput, build_graph
 from .model_extraction import DEFAULT_RETRY_POLICY, RetryPolicy, configured_chat_model
 
-app = FastAPI(title="Reel Circle recommendation agent")
+
+@dataclass(frozen=True)
+class Conversations:
+    """The recommendation agent compiled with the conversation checkpointer, and expiry for its threads."""
+
+    agent: CompiledStateGraph
+    store: ConversationStore
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async with open_checkpointer(os.environ.get("CHECKPOINT_DATABASE_URL")) as saver:
+        app.state.conversations = Conversations(build_graph(saver), ConversationStore(saver))
+        try:
+            yield
+        finally:
+            del app.state.conversations
+
+
+app = FastAPI(title="Reel Circle recommendation agent", lifespan=lifespan)
 
 _BAD_MESSAGE = {"error": "A message of 1-1000 characters is required"}
 _DEFAULT_LIMIT = 5
 _OUTBOUND_TIMEOUT = httpx.Timeout(10.0)
 # Building an SSL context loads the CA bundle (~100 ms); build it once, not on every turn.
 _OUTBOUND_SSL = ssl.create_default_context(cafile=certifi.where())
+
+
+@lru_cache(maxsize=1)
+def _in_memory_conversations() -> Conversations:
+    saver = InMemorySaver()
+    return Conversations(build_graph(saver), ConversationStore(saver))
+
+
+def conversations(request: Request) -> Conversations:
+    """The service's conversations; in memory when the app runs without its lifespan (simple test clients)."""
+    return getattr(request.app.state, "conversations", None) or _in_memory_conversations()
+
+
+def clock() -> float:
+    """Current time in seconds; tests override it to move through conversation expiry."""
+    return time.time()
 
 
 def model_retry_policy() -> RetryPolicy:
@@ -48,6 +93,15 @@ def _shortlist_size(limit: Any) -> int:
     if isinstance(limit, bool) or not isinstance(limit, int | float) or not math.isfinite(limit):
         return _DEFAULT_LIMIT
     return max(1, min(10, math.floor(limit)))
+
+
+def parse_conversation_id(body: Any) -> str | None:
+    """The turn's conversation id: None starts a new conversation; a malformed id is a ValueError."""
+    if not isinstance(body, dict) or body.get("conversationId") is None:
+        return None
+    if not is_conversation_id(body["conversationId"]):
+        raise ValueError("conversationId must be 1-64 letters, digits, '-' or '_'")
+    return body["conversationId"]
 
 
 def parse_turn(body: Any) -> TurnInput | None:
@@ -83,15 +137,41 @@ async def agent_turn(
     transport: Annotated[httpx.AsyncBaseTransport | None, Depends(outbound_transport)],
     chat_model: Annotated[BaseChatModel | None, Depends(configured_chat_model)],
     retry_policy: Annotated[RetryPolicy, Depends(model_retry_policy)],
+    remembered: Annotated[Conversations, Depends(conversations)],
+    now: Annotated[float, Depends(clock)],
 ) -> JSONResponse:
     try:
         body = json.loads(await request.body())
+        conversation_id = parse_conversation_id(body) or str(uuid.uuid4())
     except ValueError:
-        body = None
+        return JSONResponse(_BAD_MESSAGE | {"error": "Invalid request"}, status_code=400)
     turn = parse_turn(body)
     if turn is None:
         return JSONResponse(_BAD_MESSAGE, status_code=400)
+
+    now_ms = int(now * 1000)
+    await remembered.store.sweep_hourly(now_ms)
+    await remembered.store.forget_if_idle(conversation_id, now_ms)
     async with httpx.AsyncClient(transport=transport, timeout=_OUTBOUND_TIMEOUT, verify=_OUTBOUND_SSL) as client:
-        settings = {"http_client": client, "chat_model": chat_model, "model_retry": retry_policy}
-        result = await recommendation_agent.ainvoke(turn, config={"configurable": settings})
-    return JSONResponse(result["response"], headers={"Cache-Control": "no-store"})
+        settings = {
+            "turn": turn,
+            "thread_id": conversation_id,
+            "now_ms": now_ms,
+            "http_client": client,
+            "chat_model": chat_model,
+            "model_retry": retry_policy,
+        }
+        result = await remembered.agent.ainvoke({}, config={"configurable": settings})
+    payload = {**result["response"], "conversationId": conversation_id}
+    return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+
+@app.delete("/agent/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str, remembered: Annotated[Conversations, Depends(conversations)]
+) -> Response:
+    """Forgets a conversation's stored preferences (the browser calls this from Delete data)."""
+    if not is_conversation_id(conversation_id):
+        return JSONResponse({"error": "Invalid conversation id"}, status_code=400)
+    await remembered.store.delete(conversation_id)
+    return Response(status_code=204)
