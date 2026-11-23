@@ -3,11 +3,12 @@
     extract_preferences -> filter_candidates -> semantic_retrieval -> rank_candidates
         -> validate_results -> respond
 
-Node names are the trace tool names the browser already knows. The graph is linear and
-deterministic for now; pauses (clarifying questions, relaxations), model extraction and
-server-side conversation state arrive in later tickets as conditional edges and a checkpointer on
-this same graph. Outbound HTTP (embedding provider, Qdrant) uses the `http_client` passed in the
-run config, so callers and tests choose the transport. Every node except `respond` appends one step
+Node names are the trace tool names the browser already knows. The graph is linear for now;
+pauses (clarifying questions, relaxations) and server-side conversation
+state arrive in later tickets as conditional edges and a checkpointer on
+this same graph. The run config carries the outside world: the `http_client` for the embedding
+provider and Qdrant, and the `chat_model` and `model_retry` policy for extraction, so callers and
+tests choose them. Every node except `respond` appends one step
 to the response trace, so the trace shows what actually ran.
 
 ADR 0002: `message`, `persons` and `candidate_pool` are per-turn input. When a checkpointer is
@@ -22,6 +23,7 @@ from typing import Annotated, Any, Literal, TypedDict
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
+from .model_extraction import DEFAULT_RETRY_POLICY, extract_with_model, merge_model_extraction
 from .preferences import Preferences, create_conversation_preferences, update_conversation_preferences
 from .retrieval import retrieve_semantically
 from .scoring import Movie, Person, Recommendation, broken_constraints, explain_preference_match, score_candidates
@@ -51,6 +53,8 @@ class TurnState(TurnInput):
     """The input plus what the nodes build up; each node reads only keys earlier nodes have set."""
 
     preferences: Preferences
+    extraction: dict[str, Any]
+    clarifying_question: str | None
     ranked: list[Recommendation]
     candidates_meeting_constraints: int
     semantic: dict[str, Any]
@@ -84,10 +88,25 @@ def _traced(node: TracedNode) -> Callable[[TurnState, RunnableConfig], Awaitable
 
 
 async def extract_preferences(state: TurnState, config: RunnableConfig) -> NodeResult:
+    """Model extraction when a chat model is configured; deterministic rules otherwise or when it fails."""
     now = int(time.time() * 1000)
     current = state.get("incoming_preferences") or create_conversation_preferences(now)
-    preferences = update_conversation_preferences(current, state["message"], now)
-    return {"preferences": preferences}, "completed", "deterministic structured extraction"
+    settings = config["configurable"]
+    outcome = await extract_with_model(
+        settings.get("chat_model"), state["message"], current, settings.get("model_retry", DEFAULT_RETRY_POLICY)
+    )
+    if outcome.extracted is not None:
+        update = {
+            "preferences": merge_model_extraction(current, outcome.extracted, now),
+            "extraction": {"mode": "model", "status": outcome.status},
+            "clarifying_question": outcome.extracted["clarificationQuestion"],
+        }
+        return update, "completed", "model structured extraction"
+    update = {
+        "preferences": update_conversation_preferences(current, state["message"], now),
+        "extraction": {"mode": "deterministic", "status": outcome.status, "error": outcome.error},
+    }
+    return update, "completed", "deterministic structured extraction"
 
 
 async def filter_candidates(state: TurnState, config: RunnableConfig) -> NodeResult:
@@ -142,26 +161,28 @@ async def validate_results(state: TurnState, config: RunnableConfig) -> NodeResu
 
 def respond(state: TurnState) -> dict[str, Any]:
     """Assembles the response in the shape the browser's agent client expects."""
-    semantic = state["semantic"]
-    return {
-        "response": {
-            "preferences": state["preferences"],
-            "recommendations": state["recommendations"],
-            "meta": {
-                "extractionMode": "deterministic",
-                # The Python service has no model extraction yet (ticket #7), so it never reports "failed".
-                "modelStatus": "not-configured",
-                "candidatesMeetingConstraints": state["candidates_meeting_constraints"],
-                "semantic": {
-                    key: semantic[key]
-                    for key in ("retrievalMode", "embeddingMode", "embeddingModel", "dimensions", "fallbackReason")
-                    if key in semantic
-                },
-                "durationMs": round((time.perf_counter() - state["started_at"]) * 1000),
-                "trace": state["trace"],
-            },
-        }
+    semantic, extraction = state["semantic"], state["extraction"]
+    meta = {
+        "extractionMode": extraction["mode"],
+        "modelStatus": extraction["status"],
+        "modelError": extraction.get("error"),
+        "candidatesMeetingConstraints": state["candidates_meeting_constraints"],
+        "semantic": {
+            key: semantic[key]
+            for key in ("retrievalMode", "embeddingMode", "embeddingModel", "dimensions", "fallbackReason")
+            if key in semantic
+        },
+        "durationMs": round((time.perf_counter() - state["started_at"]) * 1000),
+        "trace": state["trace"],
     }
+    response = {
+        "preferences": state["preferences"],
+        "recommendations": state["recommendations"],
+        "clarificationQuestion": state.get("clarifying_question"),
+        "meta": {key: value for key, value in meta.items() if value is not None},
+    }
+    # JSON.stringify drops undefined fields; dropping None keeps the same wire shape.
+    return {"response": {key: value for key, value in response.items() if value is not None}}
 
 
 def build_graph():

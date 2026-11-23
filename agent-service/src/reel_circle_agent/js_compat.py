@@ -96,3 +96,9 @@ def encode_uri_component(value: str) -> str:
 def strip_one_trailing_slash(value: str) -> str:
     r"""`value.replace(/\/$/, '')`: removes at most one trailing slash."""
     return value[:-1] if value.endswith("/") else value
+
+
+def js_slice(value: str, end: int) -> str:
+    """`value.slice(0, end)`: cuts after `end` UTF-16 code units, so an emoji counts as two."""
+    encoded = value.encode("utf-16-le")[: end * 2]
+    return encoded.decode("utf-16-le", errors="ignore")
