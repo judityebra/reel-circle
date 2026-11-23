@@ -1,0 +1,44 @@
+{
+  "id": "en-thoughtful-then-french",
+  "lang": "en",
+  "tags": [
+    "languages",
+    "moods",
+    "multi-turn"
+  ],
+  "turns": [
+    {
+      "message": "Something thoughtful",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "moods": [
+            "Reflective"
+          ]
+        }
+      }
+    },
+    {
+      "message": "A French film",
+      "expect": {
+        "preferences": {
+          "moods": [
+            "Reflective"
+          ],
+          "languages": [
+            "fr"
+          ]
+        }
+      }
+    }
+  ]
+}

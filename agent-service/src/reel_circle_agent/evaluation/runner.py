@@ -3,7 +3,10 @@
 A scenario is a JSON file: an id, a language, tags, optional `candidatePool` and `persons`
 (defaulting to the shared parity pool), and turns. A turn has a `message` and/or a `decision`
 ("accept" or "reject") that answers the pause of the turn before, and an `expect` block read by
-the evaluators. Exclusions held after one turn are checked on the next automatically.
+the evaluators. Exclusions held after one turn are checked on the next automatically. An optional
+`model` list scripts the chat model: each turn the agent asks it, it returns the next extraction.
+A `knownIssue` (an issue reference) marks a scenario the agent is known to fail: it still runs and
+is reported, but doesn't fail the gate; if it starts passing, the scorecard says so.
 
 Runs are deterministic: no chat model, embedding provider, Qdrant, storage or tracing. The runner
 clears those environment variables while it runs (and restores them), so it is meant for the CLI
@@ -42,6 +45,28 @@ class Scenario:
     turns: list[dict[str, Any]]
     candidate_pool: list[dict[str, Any]] | None = None
     persons: list[dict[str, Any]] | None = None
+    model: list[dict[str, Any]] | None = None
+    known_issue: str | None = None
+
+
+@dataclass(frozen=True)
+class KnownFailure:
+    scenario: str
+    issue: str
+    reasons: list[str]
+
+
+class ScriptedModel:
+    """A chat model that answers each structured-output call with the next scripted extraction."""
+
+    def __init__(self, answers: list[dict[str, Any]]):
+        self.answers = list(answers)
+
+    def with_structured_output(self, *_args: Any, **_kwargs: Any) -> "ScriptedModel":
+        return self
+
+    async def ainvoke(self, _messages: Any) -> dict[str, Any]:
+        return self.answers.pop(0)
 
 
 @dataclass(frozen=True)
@@ -54,12 +79,17 @@ class Failure:
 
 @dataclass
 class Scorecard:
+    #: Scenarios that count towards the gate (everything without a known issue).
     scenarios: int = 0
     turns: int = 0
     successful_turns: int = 0
     passed_scenarios: int = 0
     passes: dict[str, int] = field(default_factory=dict)
     failures: list[Failure] = field(default_factory=list)
+    known_failures: list[KnownFailure] = field(default_factory=list)
+    fixed_known_issues: list[str] = field(default_factory=list)
+    #: tag -> [passed scenarios, scenarios]
+    by_tag: dict[str, list[int]] = field(default_factory=dict)
 
     @property
     def scenario_pass_rate(self) -> float:
@@ -70,16 +100,33 @@ class Scorecard:
             share = f"{passed / total:.0%}" if total else "-"
             return f"  {label:<18} {passed:>3}/{total:<3} {share:>5}"
 
-        lines = [f"Agent scorecard: {self.scenarios} scenarios, {self.turns} turns"]
+        known = len(self.known_failures) + len(self.fixed_known_issues)
+        lines = [
+            f"Agent scorecard: {self.scenarios + known} scenarios ({known} with a known issue), {self.turns} turns"
+        ]
         lines += [row(name, passed, self.turns) for name, passed in self.passes.items()]
         lines += [
             row("successful turns", self.successful_turns, self.turns),
             row("scenarios", self.passed_scenarios, self.scenarios),
         ]
+        if self.by_tag:
+            lines.append("By tag:")
+            lines += [row(tag, passed, total) for tag, (passed, total) in sorted(self.by_tag.items())]
         if self.failures:
             lines.append("Failures:")
             lines += [f"  {f.scenario} turn {f.turn} [{f.evaluator}]: {f.reason}" for f in self.failures]
+        if self.known_failures or self.fixed_known_issues:
+            lines.append("Known issues (not gating):")
+            lines += [f"  {k.scenario} ({k.issue}): {'; '.join(k.reasons)}" for k in self.known_failures]
+            lines += [f"  {scenario} now passes: remove its knownIssue" for scenario in self.fixed_known_issues]
         return "\n".join(lines)
+
+
+def _model_for(scenario: Scenario):
+    """A dependency returning the scenario's one scripted model (or none). A closure, not a default
+    argument: FastAPI copies default arguments on every request, which would replay the script."""
+    scripted = ScriptedModel(scenario.model) if scenario.model else None
+    return lambda: scripted
 
 
 def load_scenarios(directory: Path = SCENARIOS_DIR) -> list[Scenario]:
@@ -94,6 +141,8 @@ def load_scenarios(directory: Path = SCENARIOS_DIR) -> list[Scenario]:
                 turns=data["turns"],
                 candidate_pool=data.get("candidatePool"),
                 persons=data.get("persons"),
+                model=data.get("model"),
+                known_issue=data.get("knownIssue"),
             )
         )
     return scenarios
@@ -150,11 +199,12 @@ def run_scenarios(scenarios: list[Scenario]) -> Scorecard:
     scorecard = Scorecard(passes={evaluator.__name__.removeprefix("evaluate_"): 0 for evaluator in EVALUATORS})
     with _deterministic_agent() as client:
         for scenario in scenarios:
-            scenario_passed, earlier_exclusions = True, []
+            scenario_passed, earlier_exclusions, failures = True, [], []
+            app.dependency_overrides[configured_chat_model] = _model_for(scenario)
             for index, (turn, response, problem) in enumerate(_replay(client, scenario, defaults), start=1):
                 scorecard.turns += 1
                 if problem:
-                    scorecard.failures.append(Failure(scenario.id, index, "runner", problem))
+                    failures.append(Failure(scenario.id, index, "runner", problem))
                     scenario_passed = False
                     continue
                 scores = evaluate_turn(turn.get("expect", {}), response, earlier_exclusions)
@@ -162,10 +212,21 @@ def run_scenarios(scenarios: list[Scenario]) -> Scorecard:
                 for score in scores:
                     scorecard.passes[score.name] += score.passed
                     if not score.passed:
-                        scorecard.failures.append(Failure(scenario.id, index, score.name, score.reason))
+                        failures.append(Failure(scenario.id, index, score.name, score.reason))
                 turn_passed = all(score.passed for score in scores)
                 scorecard.successful_turns += turn_passed
                 scenario_passed &= turn_passed
-            scorecard.scenarios += 1
-            scorecard.passed_scenarios += scenario_passed
+            if scenario.known_issue and scenario_passed:
+                scorecard.fixed_known_issues.append(scenario.id)
+            elif scenario.known_issue:
+                reasons = [f"turn {f.turn} [{f.evaluator}]: {f.reason}" for f in failures]
+                scorecard.known_failures.append(KnownFailure(scenario.id, scenario.known_issue, reasons))
+            else:
+                scorecard.failures += failures
+                scorecard.scenarios += 1
+                scorecard.passed_scenarios += scenario_passed
+            for tag in scenario.tags:
+                tally = scorecard.by_tag.setdefault(tag, [0, 0])
+                tally[0] += scenario_passed
+                tally[1] += 1
     return scorecard

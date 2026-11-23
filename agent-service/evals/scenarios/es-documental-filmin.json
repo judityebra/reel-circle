@@ -1,0 +1,34 @@
+{
+  "id": "es-documental-filmin",
+  "lang": "es",
+  "tags": [
+    "genres",
+    "platforms",
+    "single-turn"
+  ],
+  "turns": [
+    {
+      "message": "Un documental en Filmin",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Documentary"
+          ],
+          "platforms": [
+            "Filmin"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -119,3 +119,93 @@ def test_exclusions_from_earlier_turns_are_checked_without_repeating_them():
     [failure] = run_scenarios([scenario]).failures
     assert (failure.turn, failure.evaluator) == (2, "final_answer")
     assert "Horror" in failure.reason
+
+
+REQUIRED_TAGS = {
+    "runtime",
+    "year-range",
+    "languages",
+    "genres",
+    "platforms",
+    "exclusions",
+    "moods",
+    "relaxation",
+    "clarifying-question",
+    "nothing-fits",
+    "multi-turn",
+    "start-over",
+    "vibe",
+}
+
+
+def test_the_bundled_set_covers_the_agent_broadly():
+    scenarios = load_scenarios()
+    assert len(scenarios) >= 40
+    assert sum(scenario.lang == "es" for scenario in scenarios) >= len(scenarios) / 3
+    assert sum(len(scenario.turns) > 1 for scenario in scenarios) >= len(scenarios) / 2
+    assert REQUIRED_TAGS <= {tag for scenario in scenarios for tag in scenario.tags}
+    assert len({scenario.id for scenario in scenarios}) == len(scenarios)
+
+
+def test_the_scorecard_breaks_results_down_by_tag():
+    scorecard = run_scenarios(load_scenarios())
+    rendered = scorecard.render()
+    assert "By tag:" in rendered
+    assert scorecard.by_tag["relaxation"][1] >= 3  # (passed, total) per tag
+
+
+def test_a_scripted_model_answers_each_turn_in_order():
+    nothing = {
+        "genres": [],
+        "excludedGenres": [],
+        "platforms": [],
+        "moods": [],
+        "maxRuntime": None,
+        "yearRange": None,
+        "languages": [],
+        "peopleCount": None,
+        "viewingContext": None,
+        "clarificationQuestion": None,
+    }
+    scenario = Scenario(
+        id="ask",
+        lang="en",
+        tags=[],
+        model=[
+            {**nothing, "clarificationQuestion": "Light or serious?"},
+            {**nothing, "genres": ["Comedy"]},
+        ],
+        turns=[
+            {"message": "hmm", "expect": {"pause": "clarifying_question"}},
+            {"message": "Something light", "expect": {"preferences": {"genres": ["Comedy"]}, "results": {"min": 1}}},
+        ],
+    )
+    scorecard = run_scenarios([scenario])
+    assert scorecard.failures == [], scorecard.render()
+
+
+def test_a_known_issue_is_reported_but_does_not_fail_the_gate():
+    known = Scenario(
+        id="known",
+        lang="en",
+        tags=[],
+        known_issue="#33",
+        turns=[
+            {"message": "No horror please", "expect": {"results": {"min": 1}}},
+        ],
+        candidate_pool=ONLY_HORROR,
+    )
+    fine = Scenario(id="fine", lang="en", tags=[], turns=[{"message": "Something funny", "expect": {}}])
+    scorecard = run_scenarios([known, fine])
+    assert scorecard.scenario_pass_rate == 1.0  # the gate counts only scenarios without a known issue
+    assert [(item.scenario, item.issue) for item in scorecard.known_failures] == [("known", "#33")]
+    assert "Known issues" in scorecard.render() and "#33" in scorecard.render()
+
+
+def test_a_known_issue_that_now_passes_is_flagged_for_cleanup():
+    fixed = Scenario(
+        id="fixed", lang="en", tags=[], known_issue="#33", turns=[{"message": "Something funny", "expect": {}}]
+    )
+    scorecard = run_scenarios([fixed])
+    assert scorecard.fixed_known_issues == ["fixed"]
+    assert "now passes" in scorecard.render()

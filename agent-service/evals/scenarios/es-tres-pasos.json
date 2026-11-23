@@ -1,0 +1,84 @@
+{
+  "id": "es-tres-pasos",
+  "lang": "es",
+  "tags": [
+    "genres",
+    "languages",
+    "multi-turn",
+    "runtime",
+    "year-range"
+  ],
+  "turns": [
+    {
+      "message": "Una película en español desde 1980",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "languages": [
+            "es"
+          ],
+          "yearRange": [
+            1980,
+            2100
+          ]
+        }
+      }
+    },
+    {
+      "message": "Que sea de animación",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "languages": [
+            "es"
+          ],
+          "genres": [
+            "Animation"
+          ]
+        }
+      }
+    },
+    {
+      "message": "De menos de 120 minutos",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "languages": [
+            "es"
+          ],
+          "genres": [
+            "Animation"
+          ],
+          "maxRuntime": 120
+        }
+      }
+    }
+  ]
+}

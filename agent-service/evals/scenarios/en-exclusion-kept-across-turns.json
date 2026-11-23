@@ -2,8 +2,8 @@
   "id": "en-exclusion-kept-across-turns",
   "lang": "en",
   "tags": [
-    "multi-turn",
     "exclusions",
+    "multi-turn",
     "runtime"
   ],
   "turns": [
@@ -17,12 +17,12 @@
           "rank_candidates",
           "validate_results"
         ],
-        "excludes": [
-          "Horror"
-        ],
         "results": {
           "min": 3
-        }
+        },
+        "excludes": [
+          "Horror"
+        ]
       }
     },
     {
@@ -35,14 +35,11 @@
           "rank_candidates",
           "validate_results"
         ],
-        "excludes": [
-          "Horror"
-        ],
-        "preferences": {
-          "maxRuntime": 120
-        },
         "results": {
           "min": 1
+        },
+        "preferences": {
+          "maxRuntime": 120
         }
       }
     }

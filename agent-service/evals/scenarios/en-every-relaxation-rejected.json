@@ -1,0 +1,105 @@
+{
+  "id": "en-every-relaxation-rejected",
+  "lang": "en",
+  "tags": [
+    "multi-turn",
+    "nothing-fits",
+    "platforms",
+    "relaxation",
+    "year-range"
+  ],
+  "candidatePool": [
+    {
+      "id": "memories",
+      "title": "Memories of Murder",
+      "year": 2003,
+      "runtime": 131,
+      "genres": [
+        "Thriller",
+        "Crime"
+      ],
+      "platforms": [
+        "Netflix"
+      ],
+      "rating": 4.3,
+      "language": "Korean"
+    },
+    {
+      "id": "clue",
+      "title": "Clue",
+      "year": 1985,
+      "runtime": 94,
+      "genres": [
+        "Comedy",
+        "Mystery"
+      ],
+      "platforms": [
+        "Filmin"
+      ],
+      "rating": 3.8,
+      "language": "English"
+    },
+    {
+      "id": "hereditary",
+      "title": "Hereditary",
+      "year": 2018,
+      "runtime": 127,
+      "genres": [
+        "Horror"
+      ],
+      "platforms": [
+        "Filmin"
+      ],
+      "rating": 4.0,
+      "language": "English"
+    }
+  ],
+  "turns": [
+    {
+      "message": "A Korean thriller from the 1990s on Filmin under 90 minutes",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates"
+        ],
+        "pause": "relaxation"
+      }
+    },
+    {
+      "decision": "reject",
+      "expect": {
+        "pause": "relaxation"
+      }
+    },
+    {
+      "decision": "reject",
+      "expect": {
+        "pause": "relaxation"
+      }
+    },
+    {
+      "decision": "reject",
+      "expect": {
+        "pause": "relaxation"
+      }
+    },
+    {
+      "decision": "reject",
+      "expect": {
+        "pause": "relaxation"
+      }
+    },
+    {
+      "decision": "reject",
+      "expect": {
+        "results": {
+          "count": 0
+        },
+        "nothingFits": "yearRange",
+        "preferences": {
+          "maxRuntime": 90
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "id": "es-comedia-90",
+  "lang": "es",
+  "tags": [
+    "genres",
+    "runtime",
+    "single-turn"
+  ],
+  "turns": [
+    {
+      "message": "Una comedia de menos de 90 minutos",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ],
+          "maxRuntime": 90
+        }
+      }
+    }
+  ]
+}

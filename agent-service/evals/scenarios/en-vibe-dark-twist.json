@@ -1,0 +1,31 @@
+{
+  "id": "en-vibe-dark-twist",
+  "lang": "en",
+  "tags": [
+    "moods",
+    "single-turn",
+    "vibe"
+  ],
+  "turns": [
+    {
+      "message": "A dark, mind-bending story with a twist ending",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "moods": [
+            "Twisty"
+          ]
+        }
+      }
+    }
+  ]
+}

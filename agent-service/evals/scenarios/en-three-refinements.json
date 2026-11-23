@@ -1,0 +1,59 @@
+{
+  "id": "en-three-refinements",
+  "lang": "en",
+  "tags": [
+    "genres",
+    "languages",
+    "multi-turn",
+    "runtime"
+  ],
+  "turns": [
+    {
+      "message": "Korean films please",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "languages": [
+            "ko"
+          ]
+        }
+      }
+    },
+    {
+      "message": "Make it a thriller",
+      "expect": {
+        "preferences": {
+          "languages": [
+            "ko"
+          ],
+          "genres": [
+            "Thriller"
+          ]
+        }
+      }
+    },
+    {
+      "message": "And under two hours",
+      "expect": {
+        "preferences": {
+          "languages": [
+            "ko"
+          ],
+          "genres": [
+            "Thriller"
+          ],
+          "maxRuntime": 120
+        }
+      }
+    }
+  ]
+}

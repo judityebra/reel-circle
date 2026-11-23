@@ -1,0 +1,54 @@
+{
+  "id": "es-quitar-exclusion",
+  "lang": "es",
+  "tags": [
+    "exclusions",
+    "genres",
+    "multi-turn"
+  ],
+  "turns": [
+    {
+      "message": "Sin comedia",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "excludes": [
+          "Comedy"
+        ]
+      }
+    },
+    {
+      "message": "Bueno, la comedia sí vale, que sea romántica",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "lifts": [
+          "Comedy"
+        ],
+        "preferences": {
+          "genres": [
+            "Comedy",
+            "Romance"
+          ],
+          "excludedGenres": []
+        }
+      }
+    }
+  ]
+}

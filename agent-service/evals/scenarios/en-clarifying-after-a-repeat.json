@@ -1,0 +1,67 @@
+{
+  "id": "en-clarifying-after-a-repeat",
+  "lang": "en",
+  "tags": [
+    "clarifying-question",
+    "genres",
+    "multi-turn"
+  ],
+  "model": [
+    {
+      "genres": [
+        "Comedy"
+      ],
+      "excludedGenres": [],
+      "platforms": [],
+      "moods": [],
+      "maxRuntime": null,
+      "yearRange": null,
+      "languages": [],
+      "peopleCount": null,
+      "viewingContext": null,
+      "clarificationQuestion": null
+    },
+    {
+      "genres": [
+        "Comedy"
+      ],
+      "excludedGenres": [],
+      "platforms": [],
+      "moods": [],
+      "maxRuntime": null,
+      "yearRange": null,
+      "languages": [],
+      "peopleCount": null,
+      "viewingContext": null,
+      "clarificationQuestion": "Short or long tonight?"
+    }
+  ],
+  "turns": [
+    {
+      "message": "Something funny",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ]
+        }
+      }
+    },
+    {
+      "message": "whatever, you choose",
+      "expect": {
+        "pause": "clarifying_question"
+      }
+    }
+  ]
+}

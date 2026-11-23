@@ -2,9 +2,9 @@
   "id": "en-funny-under-90",
   "lang": "en",
   "tags": [
-    "single-turn",
+    "genres",
     "runtime",
-    "genres"
+    "single-turn"
   ],
   "turns": [
     {
@@ -17,14 +17,14 @@
           "rank_candidates",
           "validate_results"
         ],
+        "results": {
+          "min": 1
+        },
         "preferences": {
           "genres": [
             "Comedy"
           ],
           "maxRuntime": 90
-        },
-        "results": {
-          "min": 1
         }
       }
     }
