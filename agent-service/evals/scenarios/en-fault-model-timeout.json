@@ -1,0 +1,39 @@
+{
+  "id": "en-fault-model-timeout",
+  "lang": "en",
+  "tags": [
+    "faults",
+    "genres",
+    "runtime",
+    "single-turn"
+  ],
+  "inject": {
+    "model": "timeout"
+  },
+  "turns": [
+    {
+      "message": "Something funny under 90 minutes",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "fallback": {
+          "model": "timeout"
+        },
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ],
+          "maxRuntime": 90
+        }
+      }
+    }
+  ]
+}

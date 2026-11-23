@@ -5,6 +5,9 @@ A scenario is a JSON file: an id, a language, tags, optional `candidatePool` and
 ("accept" or "reject") that answers the pause of the turn before, and an `expect` block read by
 the evaluators. Exclusions held after one turn are checked on the next automatically. An optional
 `model` list scripts the chat model: each turn the agent asks it, it returns the next extraction.
+An `inject` block makes services fail on purpose (see faults.py) and a turn's `fallback`
+expectation checks the agent reported the right fallback.
+
 A `knownIssue` (an issue reference) marks a scenario the agent is known to fail, and `knownFailure`
 pins how (reason fragments): it still runs and is listed apart, out of every gating count, but if it
 fails any other way it fails the gate, and if it starts passing the scorecard says so.
@@ -24,8 +27,10 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from ..api import app, configured_chat_model
+from ..api import app, configured_chat_model, model_retry_policy, outbound_transport
+from ..model_extraction import RetryPolicy
 from .evaluators import EVALUATORS, evaluate_turn
+from .faults import FailingModel, fault_environment, fault_transport
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCENARIOS_DIR = REPO_ROOT / "agent-service" / "evals" / "scenarios"
@@ -49,6 +54,7 @@ class Scenario:
     model: list[dict[str, Any]] | None = None
     known_issue: str | None = None
     known_failure: list[str] = field(default_factory=list)
+    inject: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -97,8 +103,11 @@ class Scorecard:
     turns: int = 0
     successful_turns: int = 0
     passed_scenarios: int = 0
-    passes: dict[str, int] = field(default_factory=dict)
+    #: evaluator -> [passed turns, turns it applied to]
+    passes: dict[str, list[int]] = field(default_factory=dict)
     failures: list[Failure] = field(default_factory=list)
+    #: [injected turns that reported the right fallback AND were successful turns, injected turns]
+    graceful_fallbacks: list[int] = field(default_factory=lambda: [0, 0])
     known_failures: list[KnownFailure] = field(default_factory=list)
     fixed_known_issues: list[str] = field(default_factory=list)
     #: tag -> [passed scenarios, scenarios]
@@ -117,7 +126,12 @@ class Scorecard:
         lines = [
             f"Agent scorecard: {self.scenarios + known} scenarios ({known} with a known issue), {self.turns} turns"
         ]
-        lines += [row(name, passed, self.turns) for name, passed in self.passes.items()]
+        labels = {"fallback": "fallback reported"}
+        lines += [
+            row(labels.get(name, name), passed, applied) for name, (passed, applied) in self.passes.items() if applied
+        ]
+        if self.graceful_fallbacks[1]:
+            lines.append(row("graceful fallback", *self.graceful_fallbacks))
         lines += [
             row("successful turns", self.successful_turns, self.turns),
             row("scenarios", self.passed_scenarios, self.scenarios),
@@ -156,6 +170,7 @@ def load_scenarios(directory: Path = SCENARIOS_DIR) -> list[Scenario]:
                 model=data.get("model"),
                 known_issue=data.get("knownIssue"),
                 known_failure=data.get("knownFailure", []),
+                inject=data.get("inject"),
             )
         )
     return scenarios
@@ -212,15 +227,46 @@ class _ScenarioRun:
     passed: bool = True
     turns: int = 0
     successful_turns: int = 0
-    passes: dict[str, int] = field(default_factory=dict)
+    passes: dict[str, list[int]] = field(default_factory=dict)
     failures: list[Failure] = field(default_factory=list)
+    graceful_fallbacks: list[int] = field(default_factory=lambda: [0, 0])
+
+
+@contextmanager
+def _injected_faults(scenario: Scenario) -> Iterator[None]:
+    """Points the agent at failing fakes for the scenario's `inject` block, then puts everything back."""
+    inject = scenario.inject or {}
+    environment = fault_environment(inject)
+    saved = {name: os.environ.get(name) for name in environment}
+    os.environ.update(environment)
+    previous = {key: app.dependency_overrides.get(key) for key in (outbound_transport, model_retry_policy)}
+    app.dependency_overrides[outbound_transport] = lambda: fault_transport(inject)
+    app.dependency_overrides[model_retry_policy] = lambda: RetryPolicy(base_delay_seconds=0, budget_seconds=2)
+    try:
+        yield
+    finally:
+        for key, override in previous.items():
+            if override is None:
+                app.dependency_overrides.pop(key, None)
+            else:
+                app.dependency_overrides[key] = override
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 def _run_one(client: TestClient, scenario: Scenario, defaults: dict[str, Any]) -> _ScenarioRun:
     run, earlier_exclusions = _ScenarioRun(), []
     scripted = ScriptedModel(scenario.model) if scenario.model else None
-    app.dependency_overrides[configured_chat_model] = _dependency(scripted)
-    for index, (turn, response, problem) in enumerate(_replay(client, scenario, defaults), start=1):
+    model_fault = (scenario.inject or {}).get("model")
+    app.dependency_overrides[configured_chat_model] = _dependency(
+        FailingModel(model_fault) if model_fault else scripted
+    )
+    with _injected_faults(scenario):
+        exchanges = _replay(client, scenario, defaults)
+    for index, (turn, response, problem) in enumerate(exchanges, start=1):
         run.turns += 1
         if problem:
             run.failures.append(Failure(scenario.id, index, "runner", problem))
@@ -229,10 +275,16 @@ def _run_one(client: TestClient, scenario: Scenario, defaults: dict[str, Any]) -
         scores = evaluate_turn(turn.get("expect", {}), response, earlier_exclusions)
         earlier_exclusions = response["preferences"].get("excludedGenres", [])
         for score in scores:
-            run.passes[score.name] = run.passes.get(score.name, 0) + score.passed
+            tally = run.passes.setdefault(score.name, [0, 0])
+            tally[0] += score.passed
+            tally[1] += 1
             if not score.passed:
                 run.failures.append(Failure(scenario.id, index, score.name, score.reason))
         turn_passed = all(score.passed for score in scores)
+        if "fallback" in turn.get("expect", {}):
+            # Graceful means the right fallback was reported AND the turn still succeeded.
+            run.graceful_fallbacks[0] += turn_passed
+            run.graceful_fallbacks[1] += 1
         run.successful_turns += turn_passed
         run.passed &= turn_passed
     if scripted and scripted.problem():
@@ -252,7 +304,7 @@ def run_scenarios(scenarios: list[Scenario]) -> Scorecard:
     if not PARITY_FIXTURES.exists():
         raise FileNotFoundError(f"reel-eval needs a source checkout; {PARITY_FIXTURES} is missing")
     defaults = json.loads(PARITY_FIXTURES.read_text(encoding="utf-8"))
-    scorecard = Scorecard(passes={evaluator.__name__.removeprefix("evaluate_"): 0 for evaluator in EVALUATORS})
+    scorecard = Scorecard(passes={evaluator.__name__.removeprefix("evaluate_"): [0, 0] for evaluator in EVALUATORS})
     with _deterministic_agent() as client:
         for scenario in scenarios:
             run = _run_one(client, scenario, defaults)
@@ -273,8 +325,11 @@ def run_scenarios(scenarios: list[Scenario]) -> Scorecard:
             scorecard.passed_scenarios += run.passed
             scorecard.turns += run.turns
             scorecard.successful_turns += run.successful_turns
-            for name, passed in run.passes.items():
-                scorecard.passes[name] += passed
+            scorecard.graceful_fallbacks[0] += run.graceful_fallbacks[0]
+            scorecard.graceful_fallbacks[1] += run.graceful_fallbacks[1]
+            for name, (passed, applied) in run.passes.items():
+                scorecard.passes[name][0] += passed
+                scorecard.passes[name][1] += applied
             for tag in scenario.tags:
                 tally = scorecard.by_tag.setdefault(tag, [0, 0])
                 tally[0] += run.passed

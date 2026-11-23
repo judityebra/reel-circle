@@ -128,3 +128,24 @@ def test_exclusions_held_earlier_must_still_hold_unless_lifted_or_started_over()
     assert not evaluate_final_answer({}, now, earlier_exclusions=["Horror", "Drama"]).passed
     assert evaluate_final_answer({"lifts": ["Horror"]}, now, earlier_exclusions=["Horror", "Drama"]).passed
     assert evaluate_final_answer({"startsOver": True}, now, earlier_exclusions=["Horror"]).passed
+
+
+def test_the_fallback_evaluator_only_applies_when_a_fallback_is_expected():
+    from reel_circle_agent.evaluation.evaluators import evaluate_fallback
+
+    assert evaluate_fallback({}, response()) is None
+
+
+def test_the_fallback_evaluator_checks_the_reported_reason():
+    from reel_circle_agent.evaluation.evaluators import evaluate_fallback
+
+    semantic_meta = {"trace": [], "semantic": {"retrievalMode": "local", "fallbackReason": "embedding-failed"}}
+    degraded = response(recommendations=[movie("a")], meta=semantic_meta)
+    assert evaluate_fallback({"fallback": {"semantic": "embedding-failed"}}, degraded).passed
+    assert not evaluate_fallback({"fallback": {"semantic": "qdrant-failed"}}, degraded).passed
+    model_meta = {"trace": [], "modelStatus": "failed", "modelError": "http-429", "extractionMode": "deterministic"}
+    rate_limited = response(recommendations=[movie("a")], meta=model_meta)
+    assert evaluate_fallback({"fallback": {"model": "http-429"}}, rate_limited).passed
+    assert not evaluate_fallback({"fallback": {"model": "timeout"}}, rate_limited).passed
+    unhurt = response(recommendations=[movie("a")], meta={"trace": [], "modelStatus": "succeeded"})
+    assert not evaluate_fallback({"fallback": {"model": "http-429"}}, unhurt).passed

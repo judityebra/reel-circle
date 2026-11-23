@@ -1,0 +1,59 @@
+{
+  "id": "es-fault-model-429",
+  "lang": "es",
+  "tags": [
+    "exclusions",
+    "faults",
+    "genres",
+    "multi-turn"
+  ],
+  "inject": {
+    "model": "http-429"
+  },
+  "turns": [
+    {
+      "message": "Nada de terror",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "fallback": {
+          "model": "http-429"
+        },
+        "excludes": [
+          "Horror"
+        ]
+      }
+    },
+    {
+      "message": "Algo de comedia",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "fallback": {
+          "model": "http-429"
+        },
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ]
+        }
+      }
+    }
+  ]
+}

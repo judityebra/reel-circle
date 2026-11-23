@@ -1,0 +1,37 @@
+{
+  "id": "es-fault-qdrant-timeout",
+  "lang": "es",
+  "tags": [
+    "faults",
+    "platforms",
+    "single-turn"
+  ],
+  "inject": {
+    "qdrant": "timeout"
+  },
+  "turns": [
+    {
+      "message": "Algo en Netflix",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "fallback": {
+          "semantic": "qdrant-failed"
+        },
+        "preferences": {
+          "platforms": [
+            "Netflix"
+          ]
+        }
+      }
+    }
+  ]
+}

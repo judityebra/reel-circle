@@ -110,8 +110,28 @@ def evaluate_final_answer(expect: Expectation, response: Response, earlier_exclu
     return Score("final_answer", True)
 
 
-EVALUATORS: list[Callable[..., Score]] = [evaluate_path, evaluate_final_answer]
+def evaluate_fallback(expect: Expectation, response: Response, earlier_exclusions: Sequence[str] = ()) -> Score | None:
+    """For a turn where a service was made to fail: the agent reported the expected fallback (and,
+    through the other evaluators, still gave a correct answer). Not applicable to other turns."""
+    if "fallback" not in expect:
+        return None
+    meta = response["meta"]
+    expected = expect["fallback"]
+    if "semantic" in expected:
+        reported = (meta.get("semantic") or {}).get("fallbackReason")
+        if reported != expected["semantic"]:
+            return Score("fallback", False, f"expected semantic fallback {expected['semantic']!r}, got {reported!r}")
+    if "model" in expected:
+        reported = meta.get("modelError") if meta.get("modelStatus") == "failed" else None
+        if reported != expected["model"]:
+            return Score("fallback", False, f"expected model fallback {expected['model']!r}, got {reported!r}")
+    return Score("fallback", True)
+
+
+EVALUATORS: list[Callable[..., Score | None]] = [evaluate_path, evaluate_final_answer, evaluate_fallback]
 
 
 def evaluate_turn(expect: Expectation, response: Response, earlier_exclusions: Sequence[str] = ()) -> list[Score]:
-    return [evaluator(expect, response, earlier_exclusions) for evaluator in EVALUATORS]
+    """Every evaluator that applies to this turn."""
+    scores = (evaluator(expect, response, earlier_exclusions) for evaluator in EVALUATORS)
+    return [score for score in scores if score is not None]
