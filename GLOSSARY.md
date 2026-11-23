@@ -52,6 +52,10 @@ _Avoid_: Catalog (the full source), candidates list
 A proposal to loosen exactly one hard constraint when no movie in the candidate pool meets them all. Excluded genres are never relaxed.
 _Avoid_: Fallback, broadening
 
+**Tightest constraint**:
+The active hard constraint that, on its own, lets the fewest movies in the candidate pool through; ties go to the one earlier in the relaxation order. Named when nothing fits.
+_Avoid_: Blocking filter, main constraint
+
 **Clarifying question**:
 A question the recommendation agent asks when a turn gives it nothing usable to act on.
 _Avoid_: Follow-up, prompt

@@ -282,6 +282,11 @@ main { width: min(1440px, 100%); padding: 0 24px 34px; background: var(--canvas)
 .conversation-message { max-width: min(76%, 680px); display: grid; grid-template-columns: 22px 1fr; gap: 7px; align-items: start; }
 .conversation-message > span { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: var(--green); background: #dceee7; }
 .conversation-message p { margin: 0; padding: 7px 9px; border-radius: 3px 9px 9px 9px; color: var(--ink); background: #fff; font-size: 10px; line-height: 1.45; }
+.relaxation-proposal { margin: -6px 0 14px; padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 10px; }
+.relaxation-proposal p { flex: 1 1 260px; margin: 0; color: var(--ink); font-size: 12px; line-height: 1.45; }
+.relaxation-proposal button { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border: 1px solid var(--green); border-radius: 999px; color: #fff; background: var(--green); font-size: 11px; font-weight: 700; cursor: pointer; }
+.relaxation-proposal button.secondary { color: var(--ink); background: transparent; border-color: var(--line); }
+.relaxation-proposal button:disabled { opacity: 0.5; cursor: wait; }
 .conversation-message.user { margin-left: auto; grid-template-columns: 1fr 22px; }
 .conversation-message.user > span { grid-column: 2; grid-row: 1; color: #9a3e25; background: #f9dfd6; }
 .conversation-message.user p { grid-column: 1; grid-row: 1; border-radius: 9px 3px 9px 9px; color: #fff; background: var(--orange); }

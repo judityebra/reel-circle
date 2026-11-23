@@ -37,6 +37,21 @@ const callRecommendationAgent = (body: unknown) => callHandler('POST', body)
 
 const jsonResponse = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => body })
 
+type ServiceReply = (url: string, init: RequestInit) => Promise<unknown>
+
+/** Stubs fetch as the Python service (answering like it by default); `url: null` means no service is configured. */
+function fakeAgentService({ url = 'https://agent.example.test', reply = async () => jsonResponse(200, pythonPayload) }: { url?: string | null; reply?: ServiceReply } = {}) {
+  if (url) process.env.AGENT_SERVICE_URL = url
+  const fetcher = vi.fn(reply)
+  vi.stubGlobal('fetch', fetcher)
+  return fetcher
+}
+
+function firstRequest(fetcher: ReturnType<typeof fakeAgentService>) {
+  const [url, init] = fetcher.mock.calls[0]
+  return { url, init, body: JSON.parse(String(init.body ?? 'null')) }
+}
+
 const environmentNames = ['OPENAI_API_KEY', 'EMBEDDING_MODEL', 'EMBEDDING_BASE_URL', 'QDRANT_URL', 'AGENT_SERVICE_URL', 'AGENT_SERVICE_TIMEOUT_MS']
 const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]))
 
@@ -54,8 +69,7 @@ afterEach(() => {
 
 describe('recommendation agent proxy to the Python service', () => {
   it('answers with the TypeScript pipeline and calls nothing when no service URL is set', async () => {
-    const fetcher = vi.fn()
-    vi.stubGlobal('fetch', fetcher)
+    const fetcher = fakeAgentService({ url: null })
     const { status, body } = await callRecommendationAgent(turn)
     expect(status).toBe(200)
     expect(fetcher).not.toHaveBeenCalled()
@@ -64,25 +78,21 @@ describe('recommendation agent proxy to the Python service', () => {
   })
 
   it('forwards the bounded turn to the Python service and returns its answer', async () => {
-    process.env.AGENT_SERVICE_URL = 'https://agent.example.test/'
-    const fetcher = vi.fn(async () => jsonResponse(200, pythonPayload))
-    vi.stubGlobal('fetch', fetcher)
+    const fetcher = fakeAgentService({ url: 'https://agent.example.test/' })
     const { status, body, headers } = await callRecommendationAgent(turn)
     expect(status).toBe(200)
     expect(headers['Cache-Control']).toBe('no-store')
     expect(fetcher).toHaveBeenCalledOnce()
-    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    const { url, init } = firstRequest(fetcher)
     expect(url).toBe('https://agent.example.test/agent')
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body as string)).toEqual({ message: 'Something funny', candidates: movies, profiles: persons, limit: 3 })
+    expect(firstRequest(fetcher).body).toEqual({ message: 'Something funny', candidates: movies, profiles: persons, limit: 3 })
     expect(body.recommendations[0].explanation).toBe('From Python.')
     expect(body.meta.agentService).toEqual({ mode: 'python' })
   })
 
   it('never forwards ratings or watch history, whatever the caller sends', async () => {
-    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
-    const fetcher = vi.fn(async () => jsonResponse(200, pythonPayload))
-    vi.stubGlobal('fetch', fetcher)
+    const fetcher = fakeAgentService()
     const leakyPerson = {
       ...persons[0],
       tasteWeights: { Comedy: 1 },
@@ -92,17 +102,15 @@ describe('recommendation agent proxy to the Python service', () => {
       email: 'maya@example.test',
     }
     await callRecommendationAgent({ ...turn, profiles: [leakyPerson] })
-    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
-    expect(JSON.parse(init.body as string).profiles).toEqual([{
+    expect(firstRequest(fetcher).body.profiles).toEqual([{
       id: 'maya', name: 'Maya', color: '#f36b35', preferredGenres: ['Comedy'],
       tasteWeights: { Comedy: 1 }, featureWeights: { 'mood:Playful': 0.5 }, ratings: [], watched: [],
     }])
   })
 
   it('ignores an unusable timeout setting and uses the default', async () => {
-    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
     process.env.AGENT_SERVICE_TIMEOUT_MS = '-5'
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, pythonPayload)))
+    fakeAgentService()
     const { body } = await callRecommendationAgent(turn)
     expect(body.meta.agentService).toEqual({ mode: 'python' })
   })
@@ -117,8 +125,7 @@ describe('recommendation agent proxy to the Python service', () => {
     }), 'invalid-response'],
     ['a network failure', async () => { throw new TypeError('fetch failed') }, 'unreachable'],
   ])('falls back to the TypeScript pipeline on %s and says so', async (_case, fetcher, reason) => {
-    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
-    vi.stubGlobal('fetch', vi.fn(fetcher))
+    fakeAgentService({ reply: fetcher })
     const { status, body } = await callRecommendationAgent(turn)
     expect(status).toBe(200)
     expect(body.recommendations[0].movie.id).toBe('clue')
@@ -127,20 +134,17 @@ describe('recommendation agent proxy to the Python service', () => {
   })
 
   it('falls back when the Python service does not answer in time', async () => {
-    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
     process.env.AGENT_SERVICE_TIMEOUT_MS = '20'
-    vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+    fakeAgentService({ reply: (_url, init) => new Promise((_resolve, reject) => {
       init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'TimeoutError')))
-    })))
+    }) })
     const { status, body } = await callRecommendationAgent(turn)
     expect(status).toBe(200)
     expect(body.meta.agentService).toEqual({ mode: 'typescript-fallback', fallbackReason: 'timeout' })
   })
 
   it('still rejects a bad request before calling the Python service', async () => {
-    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
-    const fetcher = vi.fn()
-    vi.stubGlobal('fetch', fetcher)
+    const fetcher = fakeAgentService()
     const { status } = await callRecommendationAgent({ message: '' })
     expect(status).toBe(400)
     expect(fetcher).not.toHaveBeenCalled()
@@ -149,41 +153,73 @@ describe('recommendation agent proxy to the Python service', () => {
 
 describe('conversations remembered by the Python service', () => {
   it('forwards the conversation id and keeps it when the TypeScript fallback answers', async () => {
-    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
-    const fetcher = vi.fn(async () => jsonResponse(503, {}))
-    vi.stubGlobal('fetch', fetcher)
+    const fetcher = fakeAgentService({ reply: async () => jsonResponse(503, {}) })
     const { body } = await callRecommendationAgent({ ...turn, conversationId: 'conv-123' })
-    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
-    expect(JSON.parse(init.body as string).conversationId).toBe('conv-123')
+    expect(firstRequest(fetcher).body.conversationId).toBe('conv-123')
     expect((body as unknown as { conversationId?: string }).conversationId).toBe('conv-123')
   })
 
   it('rejects a malformed conversation id, like the Python service', async () => {
-    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
-    const fetcher = vi.fn(async () => jsonResponse(200, pythonPayload))
-    vi.stubGlobal('fetch', fetcher)
+    const fetcher = fakeAgentService()
     const { status } = await callRecommendationAgent({ ...turn, conversationId: '../../etc/passwd' })
     expect(status).toBe(400)
     expect(fetcher).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['accept', 'accept'],
+    ['reject', 'reject'],
+    ['anything else', undefined],
+  ])('forwards a relaxation decision of %s to the Python service only when it is valid', async (decision, forwarded) => {
+    const fetcher = fakeAgentService()
+    await callRecommendationAgent({ ...turn, conversationId: 'conv-123', decision })
+    expect(firstRequest(fetcher).body.decision).toBe(forwarded)
+  })
+
+  it('passes a relaxation pause from the Python service through to the browser', async () => {
+    const pause = { type: 'relaxation', constraint: 'yearRange', from: [1990, 1999], to: null }
+    fakeAgentService({ reply: async () => jsonResponse(200, { ...pythonPayload, recommendations: [], pause }) })
+    const { body } = await callRecommendationAgent({ ...turn, conversationId: 'conv-123' })
+    expect((body as unknown as { pause?: unknown }).pause).toEqual(pause)
+  })
+
   it('asks the Python service to forget a conversation', async () => {
-    process.env.AGENT_SERVICE_URL = 'https://agent.example.test/'
-    const fetcher = vi.fn(async () => ({ ok: true, status: 204, json: async () => ({}) }))
-    vi.stubGlobal('fetch', fetcher)
+    const fetcher = fakeAgentService({ url: 'https://agent.example.test/', reply: async () => ({ ok: true, status: 204, json: async () => ({}) }) })
     const captured = await callHandler('DELETE', { conversationId: 'conv-123' })
     expect(captured.status).toBe(200)
     expect(captured.body).toEqual({ deleted: true })
-    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    const { url, init } = firstRequest(fetcher)
     expect(url).toBe('https://agent.example.test/agent/conversations/conv-123')
     expect(init.method).toBe('DELETE')
   })
 
   it('has nothing to forget without a Python service', async () => {
-    const fetcher = vi.fn()
-    vi.stubGlobal('fetch', fetcher)
+    const fetcher = fakeAgentService({ url: null })
     const { status, body } = await callHandler('DELETE', { conversationId: 'conv-123' })
     expect({ status, body }).toEqual({ status: 200, body: { deleted: false } })
     expect(fetcher).not.toHaveBeenCalled()
+  })
+})
+
+describe('relaxation decisions when the Python service is down', () => {
+  it('applies an accepted relaxation in the TypeScript fallback instead of losing it', async () => {
+    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(503, {})))
+    const preferences = { genres: ['Horror'], excludedGenres: [], platforms: [], moods: [], lastUpdatedAt: 1 }
+    const answering = { type: 'relaxation', constraint: 'genres', from: ['Horror'], to: [] }
+    const { body } = await callRecommendationAgent({ ...turn, message: 'Yes, loosen it', preferences, decision: 'accept', answering })
+    const fallback = body as unknown as { preferences: { genres: string[] }; recommendations: unknown[] }
+    expect(fallback.preferences.genres).toEqual([])
+    expect(fallback.recommendations).toHaveLength(2)
+  })
+
+  it('forwards the proposal a decision answers', async () => {
+    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
+    const fetcher = vi.fn(async () => jsonResponse(200, pythonPayload))
+    vi.stubGlobal('fetch', fetcher)
+    const answering = { type: 'relaxation', constraint: 'maxRuntime', from: 90, to: 105 }
+    await callRecommendationAgent({ ...turn, decision: 'reject', answering })
+    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toMatchObject({ decision: 'reject', answering })
   })
 })

@@ -24,11 +24,14 @@ from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.errors import GraphRecursionError
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
 
 from .conversations import ConversationStore, is_conversation_id, open_checkpointer, remembered_conversations
-from .graph import TurnInput
+from .graph import TurnInput, step_limit_response, turn_response
 from .model_extraction import DEFAULT_RETRY_POLICY, RetryPolicy, configured_chat_model
+from .relaxation import RelaxationDecision
 
 
 @dataclass(frozen=True)
@@ -73,6 +76,11 @@ def clock() -> int:
     return int(time.time() * 1000)
 
 
+def step_limit() -> int:
+    """The most graph steps one request may run; past it, the turn ends and the trace says so."""
+    return 12
+
+
 def model_retry_policy() -> RetryPolicy:
     """Attempts, backoff and time budget for model extraction; tests override it."""
     return DEFAULT_RETRY_POLICY
@@ -101,6 +109,19 @@ def parse_conversation_id(body: Any) -> str | None:
     if not is_conversation_id(body["conversationId"]):
         raise ValueError("conversationId must be 1-64 letters, digits, '-' or '_'")
     return body["conversationId"]
+
+
+def parse_decision(body: Any) -> tuple[RelaxationDecision, dict[str, Any]] | None:
+    """The user's answer to a relaxation, with the proposal it answers, if the request carries both."""
+    if not isinstance(body, dict) or body.get("decision") not in ("accept", "reject"):
+        return None
+    answering = body.get("answering")
+    return (body["decision"], answering) if isinstance(answering, dict) else None
+
+
+def _answers(pending: dict[str, Any], answering: dict[str, Any]) -> bool:
+    """Whether a decision is about the proposal the conversation is actually waiting on."""
+    return all(pending.get(key) == answering.get(key) for key in ("constraint", "from", "to"))
 
 
 def parse_turn(body: Any) -> TurnInput | None:
@@ -138,6 +159,7 @@ async def agent_turn(
     retry_policy: Annotated[RetryPolicy, Depends(model_retry_policy)],
     remembered: Annotated[Conversations, Depends(conversations)],
     now_ms: Annotated[int, Depends(clock)],
+    max_steps: Annotated[int, Depends(step_limit)],
 ) -> JSONResponse:
     try:
         body = json.loads(await request.body())
@@ -150,6 +172,14 @@ async def agent_turn(
 
     await remembered.store.sweep_hourly(now_ms)
     await remembered.store.forget_if_idle(conversation_id, now_ms)
+    agent = remembered.agent
+    thread = {"configurable": {"thread_id": conversation_id}}
+    pending = [interrupt.value for task in (await agent.aget_state(thread)).tasks for interrupt in task.interrupts]
+    answer = parse_decision(body)
+    # A decision answers the pending pause only if it is about that proposal; any other message
+    # (or a stale decision) starts a fresh run, which ends the pause.
+    resumes = bool(pending and answer and _answers(pending[0], answer[1]))
+    run_input = Command(resume=answer[0]) if resumes else {}
     async with httpx.AsyncClient(transport=transport, timeout=_OUTBOUND_TIMEOUT, verify=_OUTBOUND_SSL) as client:
         settings = {
             "turn": turn,
@@ -159,8 +189,13 @@ async def agent_turn(
             "chat_model": chat_model,
             "model_retry": retry_policy,
         }
-        result = await remembered.agent.ainvoke({}, config={"configurable": settings}, durability="exit")
-    payload = {**result["response"], "conversationId": conversation_id}
+        config = {"configurable": settings, "recursion_limit": max_steps}
+        try:
+            response = turn_response(await agent.ainvoke(run_input, config=config, durability="exit"), turn)
+        except GraphRecursionError:
+            stored = (await agent.aget_state(thread)).values
+            response = step_limit_response(stored, turn, max_steps, now_ms)
+    payload = {**response, "conversationId": conversation_id}
     return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
 

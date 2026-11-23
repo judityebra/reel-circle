@@ -98,6 +98,11 @@ const en = {
   learnedSignals: 'learned signals',
   comparisons: 'comparisons',
   copyRoom: 'Copy room',
+  agentProposal: 'Agent proposal',
+  acceptRelaxation: 'Accept',
+  keepConstraint: 'Keep it',
+  acceptRelaxationMessage: 'Yes, loosen it',
+  keepConstraintMessage: 'No, keep it',
 } as const
 
 export type TranslationKey = keyof typeof en
@@ -113,6 +118,7 @@ const es: Record<TranslationKey, string> = {
   tasteLearner: 'Aprendiz de gustos', readyFeedback: 'Listo para aprender', skip: 'Descartar', picked: 'Elegida', loved: 'Me encantó', rankedAlternatives: 'Alternativas ordenadas', groupScore: 'Puntuación del grupo', pickAnother: 'Elegir otra de las mejores',
   sharedTaste: 'Gusto compartido', addPreferences: 'Añade más preferencias', profileContributes: 'perfil contribuye a este resultado.', profilesContribute: 'perfiles contribuyen a este resultado.', topResult: 'Mejor resultado', noMatchYet: 'Aún no hay resultado', widenCurrent: 'Amplía los filtros actuales.', groupBalance: 'Equilibrio del grupo', strongConsensus: 'Consenso fuerte', goodCompromise: 'Buen compromiso', mixedOpinions: 'Opiniones divididas', pointSpread: 'puntos de diferencia entre personas.',
   experimentLab: 'Laboratorio de experimentos', experimentHelp: 'Comparación de modelos, desacuerdo, rutas e historial', autonomousAgent: 'Agente autónomo de decisión', autonomousHelp: 'Planificación, herramientas, trazas y aprobaciones', whichRather: '¿Cuál preferirías ver?', activeLearning: 'Aprendizaje activo', oneChoice: 'Una elección actualiza dos señales de preferencia.', importFooter: 'Importa archivos desde Ajustes de Letterboxd → Importar y exportar', learnedSignals: 'señales aprendidas', comparisons: 'comparaciones', copyRoom: 'Copiar sala',
+  agentProposal: 'Propuesta del agente', acceptRelaxation: 'Aceptar', keepConstraint: 'Mantener', acceptRelaxationMessage: 'Sí, relájalo', keepConstraintMessage: 'No, mantenlo',
 }
 
 const dictionaries: Record<Locale, Record<TranslationKey, string>> = { en, es }

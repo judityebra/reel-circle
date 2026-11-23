@@ -2,10 +2,45 @@ import type { ConversationPreferences } from './constraints'
 import type { Movie, Profile } from './recommendation'
 
 export interface AgentApiStep {
-  tool: 'extract_preferences' | 'filter_candidates' | 'semantic_retrieval' | 'rank_candidates' | 'validate_results'
+  tool: 'extract_preferences' | 'filter_candidates' | 'semantic_retrieval' | 'rank_candidates' | 'validate_results' | 'propose_relaxation' | 'step_limit'
   status: 'completed' | 'skipped'
   durationMs: number
   observation: string
+}
+
+/** The hard constraints the recommendation agent may offer to loosen, in the order it offers them. */
+export type RelaxableConstraint = 'yearRange' | 'languages' | 'genres' | 'maxRuntime' | 'platforms'
+
+/** The agent paused: nothing fits, and it asks to loosen one hard constraint. `to: null` means drop it. */
+export type RelaxationPause = {
+  [Constraint in RelaxableConstraint]: {
+    type: 'relaxation'
+    constraint: Constraint
+    from: NonNullable<ConversationPreferences[Constraint]>
+    to: ConversationPreferences[Constraint] | null
+  }
+}[RelaxableConstraint]
+
+export type RelaxationDecision = 'accept' | 'reject'
+
+export const isRelaxationDecision = (value: unknown): value is RelaxationDecision => value === 'accept' || value === 'reject'
+
+const relaxableConstraints: readonly string[] = ['yearRange', 'languages', 'genres', 'maxRuntime', 'platforms']
+
+/** Whether a value is a relaxation proposal the browser can render and answer. */
+export const isRelaxationPause = (value: unknown): value is RelaxationPause => {
+  if (!value || typeof value !== 'object') return false
+  const pause = value as Record<string, unknown>
+  return pause.type === 'relaxation' && typeof pause.constraint === 'string' && relaxableConstraints.includes(pause.constraint)
+    && pause.from !== undefined && pause.from !== null && 'to' in pause
+}
+
+/** The preferences after an accepted relaxation: the constraint loosened as proposed (`to: null` drops it). */
+export function applyRelaxation(preferences: ConversationPreferences, pause: RelaxationPause): ConversationPreferences {
+  const relaxed: ConversationPreferences = { ...preferences }
+  if (pause.to === null) delete relaxed[pause.constraint]
+  else Object.assign(relaxed, { [pause.constraint]: pause.to })
+  return relaxed
 }
 
 /** Why /api/agent answered with the TypeScript pipeline instead of the Python service. */
@@ -28,6 +63,10 @@ export interface AgentApiResponse {
     semanticTerms: string[]
   }>
   clarificationQuestion?: string
+  /** Present while the agent waits for the user to accept or reject a relaxation. */
+  pause?: RelaxationPause
+  /** Present when every relaxation was rejected: the constraint that let the fewest movies through. */
+  nothingFits?: { tightestConstraint: RelaxableConstraint | 'excludedGenres' | null }
   meta: {
     extractionMode: 'model' | 'deterministic'
     modelStatus: 'not-configured' | 'failed' | 'succeeded'
@@ -54,6 +93,8 @@ const agentUrl = (baseUrl: string) => `${baseUrl.replace(/\/$/, '')}/agent`
 
 interface AgentTurnOptions {
   conversationId?: string
+  /** The answer to a relaxation, with the proposal it answers; if that is not the pending pause, the turn is ordinary. */
+  answer?: { decision: RelaxationDecision; answering: RelaxationPause }
   fetcher?: Fetcher
 }
 
@@ -63,7 +104,7 @@ export async function requestAgentTurn(
   preferences: ConversationPreferences,
   candidates: Movie[],
   profiles: Profile[],
-  { conversationId, fetcher = fetch }: AgentTurnOptions = {},
+  { conversationId, answer, fetcher = fetch }: AgentTurnOptions = {},
 ): Promise<AgentApiResponse> {
   const response = await fetcher(agentUrl(baseUrl), {
     method: 'POST',
@@ -71,6 +112,8 @@ export async function requestAgentTurn(
     body: JSON.stringify({
       message,
       conversationId,
+      decision: answer?.decision,
+      answering: answer?.answering,
       preferences,
       candidates: candidates.slice(0, 250),
       profiles: profiles.slice(0, 12).map(({ id, name, color, preferredGenres, tasteWeights, featureWeights }) => ({
@@ -88,7 +131,8 @@ export async function requestAgentTurn(
   })
   if (!response.ok) throw new Error(`Agent service unavailable (${response.status})`)
   const payload = await response.json() as AgentApiResponse
-  if (!payload?.preferences || !Array.isArray(payload.recommendations) || !Array.isArray(payload.meta?.trace)) {
+  if (!payload?.preferences || !Array.isArray(payload.recommendations) || !Array.isArray(payload.meta?.trace)
+    || (payload.pause !== undefined && !isRelaxationPause(payload.pause))) {
     throw new Error('Agent service returned invalid data')
   }
   return payload
