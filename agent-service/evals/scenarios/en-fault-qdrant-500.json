@@ -1,0 +1,56 @@
+{
+  "id": "en-fault-qdrant-500",
+  "lang": "en",
+  "tags": [
+    "exclusions",
+    "faults",
+    "multi-turn"
+  ],
+  "inject": {
+    "qdrant": "http-500"
+  },
+  "turns": [
+    {
+      "message": "No horror tonight",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "fallback": {
+          "semantic": "qdrant-failed"
+        },
+        "excludes": [
+          "Horror"
+        ]
+      }
+    },
+    {
+      "message": "Something under two hours",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "fallback": {
+          "semantic": "qdrant-failed"
+        },
+        "preferences": {
+          "maxRuntime": 120
+        }
+      }
+    }
+  ]
+}

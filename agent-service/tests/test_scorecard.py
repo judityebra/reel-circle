@@ -267,3 +267,57 @@ def test_a_scripted_model_that_runs_out_or_has_answers_left_is_a_scenario_mistak
         ("short", "runner"),
         ("long", "runner"),
     ]
+
+
+INJECTIONS = [
+    ({"embedding": "http-503"}, {"semantic": "embedding-failed"}),
+    ({"embedding": "timeout"}, {"semantic": "embedding-failed"}),
+    ({"embedding": "invalid-json"}, {"semantic": "embedding-failed"}),
+    ({"qdrant": "http-500"}, {"semantic": "qdrant-failed"}),
+    ({"qdrant": "timeout"}, {"semantic": "qdrant-failed"}),
+    ({"qdrant": "invalid-json"}, {"semantic": "qdrant-failed"}),
+    ({"model": "timeout"}, {"model": "timeout"}),
+    ({"model": "http-429"}, {"model": "http-429"}),
+    ({"model": "invalid-json"}, {"model": "invalid-json"}),
+]
+
+
+def test_every_injected_failure_falls_back_gracefully():
+    scenarios = [
+        Scenario(
+            id=f"inject-{index}",
+            lang="en",
+            tags=["faults"],
+            inject=inject,
+            turns=[
+                {
+                    "message": "No horror, something funny",
+                    "expect": {"fallback": fallback, "excludes": ["Horror"], "results": {"min": 1}},
+                },
+            ],
+        )
+        for index, (inject, fallback) in enumerate(INJECTIONS)
+    ]
+    scorecard = run_scenarios(scenarios)
+    assert scorecard.failures == [], scorecard.render()
+    assert scorecard.passes["fallback"] == [len(INJECTIONS), len(INJECTIONS)]
+    assert "fallback" in scorecard.render()
+
+
+def test_a_fallback_that_did_not_happen_is_a_failure():
+    wrong = Scenario(
+        id="no-fault",
+        lang="en",
+        tags=[],
+        turns=[
+            {"message": "Something funny", "expect": {"fallback": {"semantic": "embedding-failed"}}},
+        ],
+    )
+    [failure] = run_scenarios([wrong]).failures
+    assert failure.evaluator == "fallback"
+
+
+def test_the_bundled_set_injects_every_failure_kind():
+    injected = [scenario.inject for scenario in load_scenarios() if scenario.inject]
+    kinds = {(service, failure) for inject in injected for service, failure in inject.items()}
+    assert {inject_pair for inject, _ in INJECTIONS for inject_pair in inject.items()} <= kinds

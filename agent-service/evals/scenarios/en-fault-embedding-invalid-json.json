@@ -1,0 +1,37 @@
+{
+  "id": "en-fault-embedding-invalid-json",
+  "lang": "en",
+  "tags": [
+    "faults",
+    "moods",
+    "single-turn"
+  ],
+  "inject": {
+    "embedding": "invalid-json"
+  },
+  "turns": [
+    {
+      "message": "Something thoughtful",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "fallback": {
+          "semantic": "embedding-failed"
+        },
+        "preferences": {
+          "moods": [
+            "Reflective"
+          ]
+        }
+      }
+    }
+  ]
+}

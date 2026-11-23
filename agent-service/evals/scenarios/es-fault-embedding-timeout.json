@@ -1,0 +1,39 @@
+{
+  "id": "es-fault-embedding-timeout",
+  "lang": "es",
+  "tags": [
+    "faults",
+    "genres",
+    "runtime",
+    "single-turn"
+  ],
+  "inject": {
+    "embedding": "timeout"
+  },
+  "turns": [
+    {
+      "message": "Una comedia de menos de 120 minutos",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "fallback": {
+          "semantic": "embedding-failed"
+        },
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ],
+          "maxRuntime": 120
+        }
+      }
+    }
+  ]
+}

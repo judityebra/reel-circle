@@ -1,0 +1,58 @@
+{
+  "id": "en-fault-model-invalid-json",
+  "lang": "en",
+  "tags": [
+    "exclusions",
+    "faults",
+    "multi-turn"
+  ],
+  "inject": {
+    "model": "invalid-json"
+  },
+  "turns": [
+    {
+      "message": "No horror please",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "fallback": {
+          "model": "invalid-json"
+        },
+        "excludes": [
+          "Horror"
+        ]
+      }
+    },
+    {
+      "message": "Make it a comedy",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "fallback": {
+          "model": "invalid-json"
+        },
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ]
+        }
+      }
+    }
+  ]
+}
