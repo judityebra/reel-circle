@@ -25,12 +25,16 @@ issue #2).
 | `AGENT_MODEL=google_genai:gemini-2.5-flash` + `GOOGLE_API_KEY` | Gemini |
 
 `AGENT_MODEL` is any `<provider>:<model>` that LangChain's `init_chat_model` accepts. Every provider
-uses native JSON-schema structured output (no forced tool call), and only OpenAI gets
+uses native JSON-schema structured output (no forced tool call); an OpenAI-compatible server that
+rejects JSON schema (400/422) gets JSON mode, like the TypeScript agent. Only OpenAI gets
 `temperature=0`, because current Claude models reject custom sampling parameters. The model's
 output is bounded to the allowed genres, moods and ranges before it touches the preferences.
-Timeouts, 408/409/429/5xx and invalid output are retried up to 3 times with backoff; then, or on
-any other error, the turn falls back to rule-based extraction and reports `modelStatus: "failed"`
-with a `modelError` such as `http-429`, `timeout` or `invalid-output`.
+
+Timeouts, 408/409/429/5xx and invalid output are retried (3 attempts with backoff) inside a 3-second
+budget, which stays below the TypeScript proxy's 4-second timeout. After that, or on any other
+error, the turn falls back to rule-based extraction and reports `modelStatus: "failed"` with a
+`modelError`: `http-<status>`, `timeout`, `invalid-json`, `request-error` or
+`configuration-error` (a model that can't be built, for example a missing API key).
 
 ## Semantic retrieval
 

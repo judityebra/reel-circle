@@ -6,8 +6,9 @@
 Node names are the trace tool names the browser already knows. The graph is linear for now;
 pauses (clarifying questions, relaxations) and server-side conversation
 state arrive in later tickets as conditional edges and a checkpointer on
-this same graph. Outbound HTTP (embedding provider, Qdrant) uses the `http_client` passed in the
-run config, so callers and tests choose the transport. Every node except `respond` appends one step
+this same graph. The run config carries the outside world: the `http_client` for the embedding
+provider and Qdrant, and the `chat_model` and `model_retry` policy for extraction, so callers and
+tests choose them. Every node except `respond` appends one step
 to the response trace, so the trace shows what actually ran.
 
 ADR 0002: `message`, `persons` and `candidate_pool` are per-turn input. When a checkpointer is
@@ -22,7 +23,7 @@ from typing import Annotated, Any, Literal, TypedDict
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-from .model_extraction import extract_with_model, merge_model_extraction
+from .model_extraction import DEFAULT_RETRY_POLICY, extract_with_model, merge_model_extraction
 from .preferences import Preferences, create_conversation_preferences, update_conversation_preferences
 from .retrieval import retrieve_semantically
 from .scoring import Movie, Person, Recommendation, broken_constraints, explain_preference_match, score_candidates
@@ -53,7 +54,7 @@ class TurnState(TurnInput):
 
     preferences: Preferences
     extraction: dict[str, Any]
-    clarification_question: str | None
+    clarifying_question: str | None
     ranked: list[Recommendation]
     candidates_meeting_constraints: int
     semantic: dict[str, Any]
@@ -90,12 +91,15 @@ async def extract_preferences(state: TurnState, config: RunnableConfig) -> NodeR
     """Model extraction when a chat model is configured; deterministic rules otherwise or when it fails."""
     now = int(time.time() * 1000)
     current = state.get("incoming_preferences") or create_conversation_preferences(now)
-    outcome = await extract_with_model(config["configurable"].get("chat_model"), state["message"], current)
+    settings = config["configurable"]
+    outcome = await extract_with_model(
+        settings.get("chat_model"), state["message"], current, settings.get("model_retry", DEFAULT_RETRY_POLICY)
+    )
     if outcome.extracted is not None:
         update = {
             "preferences": merge_model_extraction(current, outcome.extracted, now),
             "extraction": {"mode": "model", "status": outcome.status},
-            "clarification_question": outcome.extracted["clarificationQuestion"],
+            "clarifying_question": outcome.extracted["clarificationQuestion"],
         }
         return update, "completed", "model structured extraction"
     update = {
@@ -174,7 +178,7 @@ def respond(state: TurnState) -> dict[str, Any]:
     response = {
         "preferences": state["preferences"],
         "recommendations": state["recommendations"],
-        "clarificationQuestion": state.get("clarification_question"),
+        "clarificationQuestion": state.get("clarifying_question"),
         "meta": {key: value for key, value in meta.items() if value is not None},
     }
     # JSON.stringify drops undefined fields; dropping None keeps the same wire shape.

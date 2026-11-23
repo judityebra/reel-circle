@@ -5,12 +5,14 @@ value ranges, merged into the conversation's preferences the way the TypeScript 
 failure falls back to the deterministic extractor after a bounded number of retries.
 """
 
+import asyncio
 import json
 
 import pytest
 from fastapi.testclient import TestClient
 
-from reel_circle_agent.api import app, configured_chat_model
+from reel_circle_agent.api import app, configured_chat_model, model_retry_policy
+from reel_circle_agent.model_extraction import RetryPolicy
 
 MOVIES = [
     {
@@ -53,31 +55,39 @@ class StatusError(Exception):
 
 
 class FakeChatModel:
-    """Answers structured-output calls from a script: each item is an output dict or an exception to raise."""
+    """Answers structured-output calls from a script: each item is an output, an exception, or a delay."""
 
-    def __init__(self, *script):
+    def __init__(self, *script, llm_type: str = "fake"):
         self.script = list(script)
         self.calls: list[list] = []
-        self.structured_with: dict = {}
+        self.methods: list[str] = []
+        self.schema = None
+        self._llm_type = llm_type
 
-    def with_structured_output(self, schema, **options):
-        self.structured_with = {"schema": schema, **options}
+    def with_structured_output(self, schema, method=None, **_options):
+        self.schema = schema
+        self.methods.append(method)
         return self
 
     async def ainvoke(self, messages):
         self.calls.append(messages)
         item = self.script.pop(0)
+        if isinstance(item, float):
+            await asyncio.sleep(item)
+            return {}
         if isinstance(item, BaseException):
             raise item
         return item
 
 
 @pytest.fixture
-def chat_model(monkeypatch):
-    monkeypatch.setenv("AGENT_MODEL_RETRY_DELAY_SECONDS", "0")
+def chat_model():
+    app.dependency_overrides[model_retry_policy] = lambda: RetryPolicy(base_delay_seconds=0, budget_seconds=2)
 
-    def install(model: FakeChatModel | None) -> FakeChatModel | None:
+    def install(model: FakeChatModel | None, policy: RetryPolicy | None = None) -> FakeChatModel | None:
         app.dependency_overrides[configured_chat_model] = lambda: model
+        if policy:
+            app.dependency_overrides[model_retry_policy] = lambda: policy
         return model
 
     yield install
@@ -103,7 +113,9 @@ def test_a_configured_model_interprets_the_turn(chat_model):
     assert body["preferences"]["maxRuntime"] == 95
     assert [item["movie"]["id"] for item in body["recommendations"]] == ["clue"]
     assert body["meta"]["trace"][0]["observation"] == "model structured extraction"
-    assert model.structured_with["method"] == "json_schema"
+    assert model.methods == ["json_schema"]
+    schema = model.schema.model_json_schema()["properties"]
+    assert "Thriller" in schema["genres"]["items"]["enum"] and "Twisty" in schema["moods"]["items"]["enum"]
 
 
 def test_the_model_sees_the_current_preferences_and_the_latest_turn(chat_model):
@@ -159,7 +171,7 @@ def test_transient_failures_are_retried_before_giving_up(chat_model):
     [
         (StatusError(429), "http-429", 3),
         (TimeoutError("slow"), "timeout", 3),
-        (ValueError("not JSON"), "invalid-output", 3),
+        (ValueError("not JSON"), "invalid-json", 3),
         (StatusError(401), "http-401", 1),
     ],
     ids=["rate-limited", "timeout", "invalid-output", "unauthorised-is-not-retried"],
@@ -179,7 +191,40 @@ def test_a_failing_model_falls_back_to_deterministic_extraction(chat_model, fail
 def test_output_that_is_not_an_object_counts_as_invalid(chat_model):
     chat_model(FakeChatModel("Comedy please", "still text", ["a list"]))
     body = _turn("Something funny")
-    assert (body["meta"]["modelStatus"], body["meta"]["modelError"]) == ("failed", "invalid-output")
+    assert (body["meta"]["modelStatus"], body["meta"]["modelError"]) == ("failed", "invalid-json")
+
+
+def test_a_provider_rate_limit_hidden_in_the_cause_chain_is_still_retried(chat_model):
+    class ProviderRateLimit(Exception):
+        """Like langchain-google-genai: no status on the error itself, only on its cause."""
+
+    wrapped = ProviderRateLimit("quota")
+    wrapped.__cause__ = StatusError(429)
+    model = chat_model(FakeChatModel(wrapped, {**EMPTY, "genres": ["Drama"]}))
+    body = _turn("a drama")
+    assert len(model.calls) == 2 and body["meta"]["modelStatus"] == "succeeded"
+
+
+def test_an_openai_compatible_server_without_json_schema_gets_json_mode(chat_model):
+    model = chat_model(FakeChatModel(StatusError(400), {**EMPTY, "genres": ["Drama"]}, llm_type="openai-chat"))
+    body = _turn("a drama")
+    assert model.methods == ["json_schema", "json_mode"]
+    assert body["meta"]["modelStatus"] == "succeeded"
+
+
+def test_a_slow_model_falls_back_within_the_time_budget(chat_model):
+    chat_model(FakeChatModel(5.0), RetryPolicy(base_delay_seconds=0, budget_seconds=0.05))
+    body = _turn("Something funny")
+    assert (body["meta"]["modelStatus"], body["meta"]["modelError"]) == ("failed", "timeout")
+    assert body["preferences"]["genres"] == ["Comedy"]
+
+
+def test_out_of_list_values_are_dropped_not_fatal(chat_model):
+    chat_model(FakeChatModel({**EMPTY, "genres": ["Western"], "excludedGenres": ["Horror"], "moods": ["Spooky"]}))
+    body = _turn("no horror")
+    assert body["meta"]["modelStatus"] == "succeeded"
+    assert body["preferences"]["excludedGenres"] == ["Horror"]
+    assert body["preferences"]["genres"] == []
 
 
 def test_without_a_configured_model_extraction_is_deterministic(chat_model):
@@ -225,6 +270,14 @@ def test_claude_is_selected_by_configuration_without_sampling_parameters(clean_m
     assert type(model).__name__ == "ChatAnthropic"
     assert model.model == "claude-haiku-5-5"
     assert model.temperature is None
+
+
+def test_a_broken_model_configuration_falls_back_instead_of_failing_turns(clean_model_environment, chat_model):
+    clean_model_environment.setenv("AGENT_MODEL", "no-such-provider:model")
+    app.dependency_overrides.pop(configured_chat_model, None)
+    body = _turn("Something funny")
+    assert (body["meta"]["modelStatus"], body["meta"]["modelError"]) == ("failed", "configuration-error")
+    assert body["preferences"]["genres"] == ["Comedy"]
 
 
 def test_gemini_is_selected_by_configuration(clean_model_environment):
