@@ -97,7 +97,34 @@ def test_a_successful_turn_needs_every_evaluator_to_pass():
 
 def test_expected_preferences_must_match_exactly():
     preferences = {"genres": ["Drama"], "excludedGenres": [], "platforms": [], "moods": [], "languages": ["ko"]}
-    turn = response(preferences=preferences)
+    turn = response(preferences=preferences, recommendations=[movie("k", genres=["Drama"], language="Korean")])
     assert evaluate_final_answer({"preferences": {"genres": ["Drama"], "languages": ["ko"]}}, turn).passed
     assert not evaluate_final_answer({"preferences": {"genres": ["Comedy"]}}, turn).passed
     assert not evaluate_final_answer({"preferences": {"platforms": ["Netflix"]}}, turn).passed
+
+
+def test_constraint_semantics_match_the_agent():
+    any_genre = {"genres": ["Comedy", "Drama"], "excludedGenres": [], "platforms": ["Netflix", "Filmin"], "moods": []}
+    assert evaluate_final_answer({}, response(preferences=any_genre, recommendations=[movie("a")])).passed
+    edges = {"genres": [], "excludedGenres": [], "platforms": [], "moods": [], "yearRange": [2010, 2010]}
+    assert evaluate_final_answer({}, response(preferences=edges, recommendations=[movie("a", year=2010)])).passed
+    assert not evaluate_final_answer({}, response(preferences=edges, recommendations=[movie("a", year=2011)])).passed
+    no_limit = {"genres": [], "excludedGenres": [], "platforms": [], "moods": [], "maxRuntime": 0}
+    assert evaluate_final_answer({}, response(preferences=no_limit, recommendations=[movie("a", runtime=500)])).passed
+
+
+def test_an_empty_answer_needs_a_pause_or_an_honest_nothing_fits():
+    assert not evaluate_final_answer({}, response()).passed
+    assert evaluate_final_answer({}, response(nothingFits={"tightestConstraint": "genres"})).passed
+    pause = {"type": "clarifying_question", "question": "Light or serious?"}
+    assert evaluate_final_answer({}, response(pause=pause)).passed
+
+
+def test_exclusions_held_earlier_must_still_hold_unless_lifted_or_started_over():
+    now = response(
+        preferences={"genres": [], "excludedGenres": ["Drama"], "platforms": [], "moods": []},
+        recommendations=[movie("a")],
+    )
+    assert not evaluate_final_answer({}, now, earlier_exclusions=["Horror", "Drama"]).passed
+    assert evaluate_final_answer({"lifts": ["Horror"]}, now, earlier_exclusions=["Horror", "Drama"]).passed
+    assert evaluate_final_answer({"startsOver": True}, now, earlier_exclusions=["Horror"]).passed

@@ -89,3 +89,33 @@ def test_the_command_fails_below_the_threshold(tmp_path, capsys):
     assert main(["--scenarios", str(tmp_path)]) == 1
     assert "0/1" in capsys.readouterr().out
     assert main([]) == 0
+
+
+def test_a_decision_without_a_pause_to_answer_is_a_failure():
+    scenario = Scenario(
+        id="no-pause",
+        lang="en",
+        tags=[],
+        turns=[
+            {"message": "Something funny", "expect": {}},
+            {"decision": "accept", "expect": {}},
+        ],
+    )
+    [failure] = run_scenarios([scenario]).failures
+    assert (failure.turn, failure.evaluator) == (2, "runner")
+    assert "no pause" in failure.reason
+
+
+def test_exclusions_from_earlier_turns_are_checked_without_repeating_them():
+    scenario = Scenario(
+        id="carry",
+        lang="en",
+        tags=[],
+        turns=[
+            {"message": "No horror tonight", "expect": {}},
+            {"message": "Start over. Something funny", "expect": {}},
+        ],
+    )
+    [failure] = run_scenarios([scenario]).failures
+    assert (failure.turn, failure.evaluator) == (2, "final_answer")
+    assert "Horror" in failure.reason

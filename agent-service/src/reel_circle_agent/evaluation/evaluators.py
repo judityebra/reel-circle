@@ -7,13 +7,14 @@ independently of the agent's own filter, so a bug in the agent can't grade itsel
 A successful turn (GLOSSARY.md) is one where every evaluator passes.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 Expectation = dict[str, Any]
 Response = dict[str, Any]
 
+# Deliberately a copy of the agent's alias table (scoring.py): add a new language to both.
 _LANGUAGE_NAMES = {
     "en": "english",
     "es": "spanish",
@@ -58,7 +59,7 @@ def _broken_constraints(movie: dict[str, Any], preferences: dict[str, Any]) -> l
     return broken
 
 
-def evaluate_path(expect: Expectation, response: Response) -> Score:
+def evaluate_path(expect: Expectation, response: Response, earlier_exclusions: Sequence[str] = ()) -> Score:
     """The route the agent took: the expected nodes in order, the expected pause (or none), no step limit."""
     tools = [step["tool"] for step in response["meta"]["trace"]]
     if "step_limit" in tools:
@@ -72,8 +73,12 @@ def evaluate_path(expect: Expectation, response: Response) -> Score:
     return Score("path", True)
 
 
-def evaluate_final_answer(expect: Expectation, response: Response) -> Score:
-    """The answer itself: no broken hard constraint, earlier exclusions kept, the expected results."""
+def evaluate_final_answer(expect: Expectation, response: Response, earlier_exclusions: Sequence[str] = ()) -> Score:
+    """The answer itself: no broken hard constraint, earlier exclusions kept, the expected results.
+
+    `earlier_exclusions` are the genres excluded before this turn; they must still be excluded unless
+    the turn `startsOver` or `lifts` them. Every turn must give a movie, a pause or an honest nothing-fits.
+    """
     preferences = response["preferences"]
     recommendations = response["recommendations"]
     for item in recommendations:
@@ -83,7 +88,9 @@ def evaluate_final_answer(expect: Expectation, response: Response) -> Score:
     wrong = [key for key, value in expect.get("preferences", {}).items() if preferences.get(key) != value]
     if wrong:
         return Score("final_answer", False, f"unexpected preferences: {', '.join(wrong)}")
-    missing = [genre for genre in expect.get("excludes", []) if genre not in preferences.get("excludedGenres", [])]
+    kept = [] if expect.get("startsOver") else [g for g in earlier_exclusions if g not in expect.get("lifts", [])]
+    excluded = preferences.get("excludedGenres", [])
+    missing = [genre for genre in dict.fromkeys([*kept, *expect.get("excludes", [])]) if genre not in excluded]
     if missing:
         return Score("final_answer", False, f"lost exclusions: {', '.join(missing)}")
     results = expect.get("results", {})
@@ -94,6 +101,8 @@ def evaluate_final_answer(expect: Expectation, response: Response) -> Score:
         return Score("final_answer", False, f"expected at least {results['min']} results, got {len(ids)}")
     if "top" in results and ids[: len(results["top"])] != results["top"]:
         return Score("final_answer", False, f"expected {results['top']} first, got {ids}")
+    if not ids and not response.get("pause") and not response.get("nothingFits"):
+        return Score("final_answer", False, "empty answer: no movie, no pause and no nothing-fits")
     if "nothingFits" in expect:
         tightest = (response.get("nothingFits") or {}).get("tightestConstraint")
         if tightest != expect["nothingFits"]:
@@ -101,8 +110,8 @@ def evaluate_final_answer(expect: Expectation, response: Response) -> Score:
     return Score("final_answer", True)
 
 
-EVALUATORS: list[Callable[[Expectation, Response], Score]] = [evaluate_path, evaluate_final_answer]
+EVALUATORS: list[Callable[..., Score]] = [evaluate_path, evaluate_final_answer]
 
 
-def evaluate_turn(expect: Expectation, response: Response) -> list[Score]:
-    return [evaluator(expect, response) for evaluator in EVALUATORS]
+def evaluate_turn(expect: Expectation, response: Response, earlier_exclusions: Sequence[str] = ()) -> list[Score]:
+    return [evaluator(expect, response, earlier_exclusions) for evaluator in EVALUATORS]
