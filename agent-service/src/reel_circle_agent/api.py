@@ -12,31 +12,39 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from .graph import TurnState, recommendation_agent
+from .graph import TurnInput, recommendation_agent
 
 app = FastAPI(title="Reel Circle recommendation agent")
 
 _BAD_MESSAGE = {"error": "A message of 1-1000 characters is required"}
+_DEFAULT_LIMIT = 5
 
 
-def _is_number(value: Any) -> bool:
-    return isinstance(value, int | float) and not isinstance(value, bool)
+def _utf16_length(text: str) -> int:
+    """JavaScript's `string.length`, which counts UTF-16 code units (an emoji counts as two)."""
+    return len(text.encode("utf-16-le")) // 2
 
 
-def parse_turn(body: Any) -> TurnState | None:
+def _shortlist_size(limit: Any) -> int:
+    if isinstance(limit, bool) or not isinstance(limit, int | float) or not math.isfinite(limit):
+        return _DEFAULT_LIMIT
+    return max(1, min(10, math.floor(limit)))
+
+
+def parse_turn(body: Any) -> TurnInput | None:
     """Validates and bounds a turn the way the TypeScript handler does; None means a bad request."""
     if not isinstance(body, dict) or not isinstance(body.get("message"), str):
         return None
     message = body["message"].strip()
-    if not message or len(message) > 1000:
+    if not message or _utf16_length(message) > 1000:
         return None
-    limit = body.get("limit")
     return {
         "message": message,
         "incoming_preferences": body["preferences"] if isinstance(body.get("preferences"), dict) else None,
-        "candidates": body["candidates"][:250] if isinstance(body.get("candidates"), list) else [],
+        "candidate_pool": body["candidates"][:250] if isinstance(body.get("candidates"), list) else [],
         "persons": body["profiles"][:12] if isinstance(body.get("profiles"), list) else [],
-        "limit": max(1, min(10, math.floor(limit))) if _is_number(limit) else 5,
+        "limit": _shortlist_size(body.get("limit")),
+        "started_at": time.perf_counter(),
     }
 
 
@@ -59,28 +67,5 @@ async def agent_turn(request: Request) -> JSONResponse:
     turn = parse_turn(body)
     if turn is None:
         return JSONResponse(_BAD_MESSAGE, status_code=400)
-
-    started = time.perf_counter()
     result = await recommendation_agent.ainvoke(turn)
-    semantic = result.get("semantic") or {
-        "retrievalMode": "local",
-        "embeddingMode": "local",
-        "embeddingModel": "local-hash-v1",
-        "dimensions": 384,
-    }
-    payload = {
-        "preferences": result["preferences"],
-        "recommendations": result["recommendations"],
-        "meta": {
-            "extractionMode": "deterministic",
-            # Model extraction is not part of the Python service yet (ticket #7).
-            "modelStatus": "not-configured",
-            "candidatesMeetingConstraints": result["candidates_meeting_constraints"],
-            "semantic": {
-                key: semantic[key] for key in ("retrievalMode", "embeddingMode", "embeddingModel", "dimensions")
-            },
-            "durationMs": round((time.perf_counter() - started) * 1000),
-            "trace": result["trace"],
-        },
-    }
-    return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+    return JSONResponse(result["response"], headers={"Cache-Control": "no-store"})

@@ -50,3 +50,39 @@ def test_turn_with_an_empty_candidate_pool_returns_no_recommendations_and_a_full
         "skipped",
         "completed",
     ]
+
+
+def test_message_length_is_counted_in_utf16_units_like_the_browser():
+    assert client.post("/agent", json={"message": "😀" * 500}).status_code == 200
+    assert client.post("/agent", json={"message": "😀" * 501}).status_code == 400
+
+
+def test_a_non_finite_limit_falls_back_to_the_default_shortlist_size():
+    response = client.post(
+        "/agent",
+        content='{"message": "Something funny", "limit": NaN}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 200
+
+
+def test_incoming_preferences_without_exclusions_are_accepted():
+    response = client.post(
+        "/agent", json={"message": "Under 90 minutes", "preferences": {"genres": ["Comedy"], "lastUpdatedAt": 0}}
+    )
+    assert response.status_code == 200
+    assert response.json()["preferences"]["genres"] == ["Comedy"]
+    assert response.json()["preferences"]["excludedGenres"] == []
+
+
+def test_langsmith_tracing_is_off_unless_switched_on(monkeypatch):
+    from langsmith.utils import get_env_var, tracing_is_enabled
+
+    for name in ["LANGSMITH_TRACING", "LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGCHAIN_TRACING"]:
+        monkeypatch.delenv(name, raising=False)
+    get_env_var.cache_clear()  # langsmith caches environment lookups
+    assert not tracing_is_enabled()
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    get_env_var.cache_clear()
+    assert tracing_is_enabled()
+    get_env_var.cache_clear()

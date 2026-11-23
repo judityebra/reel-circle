@@ -1,11 +1,16 @@
 """The recommendation agent as a LangGraph state graph.
 
-    extract -> filter -> semantic -> rank -> validate -> respond
+    extract_preferences -> filter_candidates -> semantic_retrieval -> rank_candidates
+        -> validate_results -> respond
 
-This ticket's graph is linear and deterministic. Pauses (clarifying questions, relaxations), model
-extraction and server-side conversation state are added by later tickets as conditional edges and
-a checkpointer on this same graph. Each traced node appends one step to the response trace, so the
-trace shows what actually ran.
+Node names are the trace tool names the browser already knows. The graph is linear and
+deterministic for now; pauses (clarifying questions, relaxations), model extraction and
+server-side conversation state arrive in later tickets as conditional edges and a checkpointer on
+this same graph. Every node except `respond` appends one step to the response trace, so the trace
+shows what actually ran.
+
+ADR 0002: `message`, `persons` and `candidate_pool` are per-turn input. When a checkpointer is
+added, they must stay out of the persisted state.
 """
 
 import operator
@@ -19,65 +24,72 @@ from .preferences import Preferences, create_conversation_preferences, update_co
 from .scoring import Movie, Person, Recommendation, broken_constraints, explain_preference_match, score_candidates
 from .semantic import retrieve_semantically
 
+StepStatus = Literal["completed", "skipped"]
+
 
 class TraceStep(TypedDict):
     tool: str
-    status: Literal["completed", "skipped"]
+    status: StepStatus
     durationMs: int
     observation: str
 
 
-class TurnState(TypedDict, total=False):
-    # Input, as the browser sent it.
+class TurnInput(TypedDict):
+    """Per-turn input, as the browser sent it."""
+
     message: str
     incoming_preferences: Preferences | None
-    candidates: list[Movie]
+    candidate_pool: list[Movie]
     persons: list[Person]
     limit: int
-    # Built up node by node.
+    started_at: float
+
+
+class TurnState(TurnInput):
+    """The input plus what the nodes build up; each node reads only keys earlier nodes have set."""
+
     preferences: Preferences
     ranked: list[Recommendation]
     candidates_meeting_constraints: int
     semantic: dict[str, Any]
     recommendations: list[dict[str, Any]]
     trace: Annotated[list[TraceStep], operator.add]
+    response: dict[str, Any]
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
+NodeResult = tuple[dict[str, Any], StepStatus, str]
 
 
-NodeResult = tuple[dict[str, Any], Literal["completed", "skipped"], str]
+def _status(did_work: bool) -> StepStatus:
+    return "completed" if did_work else "skipped"
 
 
-def _traced(tool: str, node: Callable[[TurnState], NodeResult]) -> Callable[[TurnState], dict[str, Any]]:
-    """Runs a node and records it as one trace step under the tool name the browser expects."""
+def _traced(node: Callable[[TurnState], NodeResult]) -> Callable[[TurnState], dict[str, Any]]:
+    """Runs a node and records it as one trace step named after the node."""
 
     def run(state: TurnState) -> dict[str, Any]:
         started = time.perf_counter()
         update, status, observation = node(state)
         duration = round((time.perf_counter() - started) * 1000)
-        return {
-            **update,
-            "trace": [{"tool": tool, "status": status, "durationMs": duration, "observation": observation}],
-        }
+        step: TraceStep = {"tool": node.__name__, "status": status, "durationMs": duration, "observation": observation}
+        return {**update, "trace": [step]}
 
+    run.__name__ = node.__name__
     return run
 
 
-def extract(state: TurnState) -> NodeResult:
-    now = _now_ms()
+def extract_preferences(state: TurnState) -> NodeResult:
+    now = int(time.time() * 1000)
     current = state.get("incoming_preferences") or create_conversation_preferences(now)
     preferences = update_conversation_preferences(current, state["message"], now)
     return {"preferences": preferences}, "completed", "deterministic structured extraction"
 
 
 def filter_candidates(state: TurnState) -> NodeResult:
-    candidates = state["candidates"]
-    ranked = score_candidates(candidates, state["persons"], state["preferences"])
-    status = "completed" if candidates else "skipped"
+    pool = state["candidate_pool"]
+    ranked = score_candidates(pool, state["persons"], state["preferences"])
     update = {"ranked": ranked, "candidates_meeting_constraints": len(ranked)}
-    return update, status, f"{len(ranked)}/{len(candidates)} candidates satisfy hard constraints"
+    return update, _status(bool(pool)), f"{len(ranked)}/{len(pool)} candidates satisfy hard constraints"
 
 
 def semantic_retrieval(state: TurnState) -> NodeResult:
@@ -85,31 +97,29 @@ def semantic_retrieval(state: TurnState) -> NodeResult:
     result = retrieve_semantically(state["message"], ranked)
     matches = sum(1 for recommendation in result["recommendations"] if recommendation["semanticScore"] > 0)
     source = f"{result['retrievalMode']} · {result['embeddingModel']} · {result['dimensions']}d"
-    observation = f"{source} · {matches}/{len(ranked)} matches"
-    return {"ranked": result["recommendations"], "semantic": result}, "completed" if ranked else "skipped", observation
+    update = {"ranked": result["recommendations"], "semantic": result}
+    return update, _status(bool(ranked)), f"{source} · {matches}/{len(ranked)} matches"
 
 
-def rank(state: TurnState) -> NodeResult:
-    preferences = state["preferences"]
-    recommendations = []
-    for recommendation in state["ranked"][: state["limit"]]:
-        movie, terms = recommendation["movie"], recommendation["semanticTerms"]
-        signals = f" Semantic signals: {', '.join(terms[:3])}." if terms else ""
-        recommendations.append(
-            {
-                "movie": movie,
-                "score": recommendation["score"],
-                "matchedPreferences": recommendation["reasons"],
-                "explanation": f"{explain_preference_match(movie, preferences)}{signals}",
-                "semanticScore": recommendation["semanticScore"],
-                "semanticTerms": terms,
-            }
-        )
-    status = "completed" if recommendations else "skipped"
-    return {"recommendations": recommendations}, status, f"{len(recommendations)} recommendations returned"
+def _shortlist_entry(recommendation: Recommendation, preferences: Preferences) -> dict[str, Any]:
+    movie, terms = recommendation["movie"], recommendation["semanticTerms"]
+    signals = f" Semantic signals: {', '.join(terms[:3])}." if terms else ""
+    return {
+        "movie": movie,
+        "score": recommendation["score"],
+        "matchedPreferences": recommendation["reasons"],
+        "explanation": f"{explain_preference_match(movie, preferences)}{signals}",
+        "semanticScore": recommendation["semanticScore"],
+        "semanticTerms": terms,
+    }
 
 
-def validate(state: TurnState) -> NodeResult:
+def rank_candidates(state: TurnState) -> NodeResult:
+    shortlist = [_shortlist_entry(item, state["preferences"]) for item in state["ranked"][: state["limit"]]]
+    return {"recommendations": shortlist}, _status(bool(shortlist)), f"{len(shortlist)} recommendations returned"
+
+
+def validate_results(state: TurnState) -> NodeResult:
     """Guardrail: drops any recommendation that breaks a hard constraint instead of re-ranking.
 
     Filtering runs before ranking, so a violation can only come from a bug; it is reported in the
@@ -125,19 +135,39 @@ def validate(state: TurnState) -> NodeResult:
     return {"recommendations": kept}, "completed", observation
 
 
+def respond(state: TurnState) -> dict[str, Any]:
+    """Assembles the response in the shape the browser's agent client expects."""
+    semantic = state["semantic"]
+    return {
+        "response": {
+            "preferences": state["preferences"],
+            "recommendations": state["recommendations"],
+            "meta": {
+                "extractionMode": "deterministic",
+                # The Python service has no model extraction yet (ticket #7), so it never reports "failed".
+                "modelStatus": "not-configured",
+                "candidatesMeetingConstraints": state["candidates_meeting_constraints"],
+                "semantic": {
+                    key: semantic[key] for key in ("retrievalMode", "embeddingMode", "embeddingModel", "dimensions")
+                },
+                "durationMs": round((time.perf_counter() - state["started_at"]) * 1000),
+                "trace": state["trace"],
+            },
+        }
+    }
+
+
 def build_graph():
     graph = StateGraph(TurnState)
-    graph.add_node("extract", _traced("extract_preferences", extract))
-    graph.add_node("filter", _traced("filter_candidates", filter_candidates))
-    graph.add_node("semantic", _traced("semantic_retrieval", semantic_retrieval))
-    graph.add_node("rank", _traced("rank_candidates", rank))
-    graph.add_node("validate", _traced("validate_results", validate))
-    graph.add_edge(START, "extract")
-    graph.add_edge("extract", "filter")
-    graph.add_edge("filter", "semantic")
-    graph.add_edge("semantic", "rank")
-    graph.add_edge("rank", "validate")
-    graph.add_edge("validate", END)
+    steps = [extract_preferences, filter_candidates, semantic_retrieval, rank_candidates, validate_results]
+    for step in steps:
+        graph.add_node(step.__name__, _traced(step))
+    graph.add_node("respond", respond)
+    graph.add_edge(START, steps[0].__name__)
+    for current, following in zip(steps, steps[1:], strict=False):
+        graph.add_edge(current.__name__, following.__name__)
+    graph.add_edge(steps[-1].__name__, "respond")
+    graph.add_edge("respond", END)
     return graph.compile()
 
 

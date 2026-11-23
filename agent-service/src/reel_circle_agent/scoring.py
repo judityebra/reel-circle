@@ -7,7 +7,7 @@ back exactly as it arrived.
 import math
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from .js_compat import js_round, js_str, js_sum, js_to_fixed, strip_accents_lower
 from .preferences import Preferences
@@ -15,6 +15,7 @@ from .preferences import Preferences
 Movie = dict[str, Any]
 Person = dict[str, Any]
 Recommendation = dict[str, Any]
+RankingMode = Literal["balanced", "average", "least-misery", "nash"]
 
 _LANGUAGE_ALIASES = {
     "en": "english",
@@ -27,7 +28,8 @@ _LANGUAGE_ALIASES = {
 }
 
 
-def _language(value: str) -> str:
+def _language_name(value: str) -> str:
+    """An ISO 639-1 code or a language name, as a lower-case language name."""
     return _LANGUAGE_ALIASES.get(value.lower(), value.lower())
 
 
@@ -48,7 +50,9 @@ def _meets_year_range(movie: Movie, preferences: Preferences) -> bool:
 def _meets_languages(movie: Movie, preferences: Preferences) -> bool:
     languages = preferences.get("languages") or []
     language = movie.get("language")
-    return not languages or bool(language and any(_language(wanted) == _language(language) for wanted in languages))
+    return not languages or bool(
+        language and any(_language_name(wanted) == _language_name(language) for wanted in languages)
+    )
 
 
 def _meets_genres(movie: Movie, preferences: Preferences) -> bool:
@@ -98,7 +102,7 @@ def movie_features(movie: Movie) -> list[str]:
     ]
 
 
-def aggregate_group_score(scores: list[int], mode: str) -> int:
+def aggregate_group_score(scores: list[int], mode: RankingMode) -> int:
     if not scores:
         return 0
     if mode == "least-misery":
