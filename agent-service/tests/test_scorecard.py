@@ -382,7 +382,7 @@ def test_the_privacy_check_catches_a_secret_that_is_stored():
         ],
     )
     [failure] = run_scenarios([scenario]).failures
-    assert failure.evaluator == "privacy" and "Horror" in failure.reason
+    assert failure.evaluator == "privacy" and "Horror (in storage)" in failure.reason
 
 
 def test_a_server_error_is_recorded_not_raised():

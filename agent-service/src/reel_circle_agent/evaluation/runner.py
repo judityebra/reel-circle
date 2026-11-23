@@ -304,10 +304,19 @@ def _run_one(client: TestClient, scenario: Scenario, defaults: dict[str, Any]) -
 
 
 def _stored_text(client: TestClient, conversation_ids: set[str]) -> str:
-    """Everything the agent's checkpointer holds for these conversations (in-memory storage)."""
+    """Everything the agent's in-memory checkpointer holds for these conversations, deserialized:
+    the checkpoints and their metadata, the channel values (kept apart as blobs) and pending writes."""
     saver = client.app.state.conversations.agent.checkpointer
-    stored = [saver.storage.get(thread) for thread in conversation_ids]
-    stored += [value for key, value in saver.writes.items() if key[0] in conversation_ids]
+    load = saver.serde.loads_typed
+    stored = []
+    for thread in conversation_ids:
+        for checkpoints in saver.storage.get(thread, {}).values():
+            for checkpoint, metadata, _parent in checkpoints.values():
+                stored += [load(checkpoint), load(metadata)]
+    stored += [load(value) for key, value in saver.blobs.items() if key[0] in conversation_ids and value[0] != "empty"]
+    for key, writes in saver.writes.items():
+        if key[0] in conversation_ids:
+            stored += [load(value) for _task, _channel, value, _path in writes.values()]
     return str(stored)
 
 
@@ -315,13 +324,15 @@ def _check_privacy(client: TestClient, scenario: Scenario, exchanges: list, run:
     """Fails the scenario if any private string reached the agent's storage or its responses."""
     responses = [response for _, response, _ in exchanges if response]
     conversation_ids = {response["conversationId"] for response in responses}
-    seen = _stored_text(client, conversation_ids) + str(responses)
-    leaked = [secret for secret in scenario.privacy if secret in seen]
+    places = {"storage": _stored_text(client, conversation_ids), "responses": str(responses)}
+    leaks = [
+        f"{secret} (in {place})" for secret in scenario.privacy for place, text in places.items() if secret in text
+    ]
     tally = run.passes.setdefault("privacy", [0, 0])
-    tally[0] += not leaked
+    tally[0] += not leaks
     tally[1] += 1
-    if leaked:
-        run.failures.append(Failure(scenario.id, len(exchanges), "privacy", f"leaked: {', '.join(leaked)}"))
+    if leaks:
+        run.failures.append(Failure(scenario.id, len(exchanges), "privacy", f"leaked: {', '.join(leaks)}"))
         run.passed = False
 
 
