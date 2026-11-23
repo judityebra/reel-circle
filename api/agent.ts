@@ -1,6 +1,6 @@
 import { createConversationPreferences, updateConversationPreferences, type ConversationPreferences } from '../src/lib/constraints.js'
 import { explainPreferenceMatch, scoreCandidates, type Movie, type Profile } from '../src/lib/recommendation.js'
-import type { AgentApiResponse, AgentServiceInfo } from '../src/lib/agent-api.js'
+import { isRelaxationDecision, type AgentApiResponse, type AgentApiStep, type AgentServiceInfo, type RelaxationDecision } from '../src/lib/agent-api.js'
 import { retrieveSemantically } from './semantic-service.js'
 
 interface ServerlessRequest {
@@ -17,17 +17,11 @@ interface ServerlessResponse {
 interface AgentRequest {
   message: string
   conversationId?: string
+  decision?: RelaxationDecision
   preferences?: ConversationPreferences
   candidates?: Movie[]
   profiles?: Profile[]
   limit?: number
-}
-
-interface AgentStep {
-  tool: 'extract_preferences' | 'filter_candidates' | 'semantic_retrieval' | 'rank_candidates' | 'validate_results'
-  status: 'completed' | 'skipped'
-  durationMs: number
-  observation: string
 }
 
 interface ModelExtraction {
@@ -60,6 +54,7 @@ function parseRequest(body: unknown): AgentRequest | undefined {
   return {
     message,
     conversationId: isConversationId(body.conversationId) ? body.conversationId : undefined,
+    decision: isRelaxationDecision(body.decision) ? body.decision : undefined,
     preferences: isRecord(body.preferences) ? body.preferences as unknown as ConversationPreferences : undefined,
     candidates: Array.isArray(body.candidates) ? body.candidates.slice(0, 250) as Movie[] : [],
     profiles: Array.isArray(body.profiles) ? body.profiles.slice(0, 12) as Profile[] : [],
@@ -239,7 +234,7 @@ export default async function handler(request: ServerlessRequest, response: Serv
 /** The TypeScript recommendation agent: used without a service URL, and as the fallback when the service fails. */
 async function runTypeScriptAgent(input: AgentRequest): Promise<AgentApiResponse> {
   const startedAt = Date.now()
-  const trace: AgentStep[] = []
+  const trace: AgentApiStep[] = []
   const current = input.preferences ?? createConversationPreferences(startedAt)
   let modelExtraction: ModelExtraction | undefined
   let extractionMode: 'model' | 'deterministic' = 'deterministic'

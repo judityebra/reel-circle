@@ -3,7 +3,8 @@ import { Background, Controls, ReactFlow, useNodesState, type Edge, type Node } 
 import '@xyflow/react/dist/style.css'
 import { Activity, BarChart3, Bot, BrainCircuit, Check, CheckCircle2, ChevronRight, Clock3, Copy, Cpu, Database, Download, Film, FlaskConical, GitCompareArrows, Heart, Layers3, LoaderCircle, MessageSquareText, MonitorPlay, Moon, Network, Play, Plus, Route, RotateCcw, Search, Share2, ShieldCheck, Shuffle, Sparkles, Sun, Target, Thermometer, ThumbsDown, Trash2, Upload, Users, X } from 'lucide-react'
 import { catalog as demoCatalog, demoProfiles, profileColors } from './data'
-import { deleteAgentConversation, requestAgentTurn, type AgentApiResponse } from './lib/agent-api'
+import { deleteAgentConversation, requestAgentTurn, type AgentApiResponse, type RelaxationDecision, type RelaxationPause } from './lib/agent-api'
+import { describeNothingFits, describeRelaxation } from './lib/relaxation-text'
 import { evaluateAgentTrace, scoreAgentRun } from './lib/agent-evaluation'
 import { createConversationPreferences, describeConstraints, parseConstraintPrompt, updateConversationPreferences, type ConversationPreferences } from './lib/constraints'
 import { runDecisionAgent, type AgentTraceEntry } from './lib/decision-agent'
@@ -35,6 +36,9 @@ const fallbackPoster = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/
 const usePosterFallback = (event: SyntheticEvent<HTMLImageElement>) => {
   event.currentTarget.src = fallbackPoster
 }
+
+
+const nothingFitsYet = 'Nothing fits every hard constraint yet. Tell me which detail matters least and I will widen that boundary.'
 
 const displayValue = (locale: Locale, value: string) => {
   if (locale === 'en') return value
@@ -71,6 +75,7 @@ function App() {
   const [conversationPreferences, setConversationPreferences] = useState<ConversationPreferences>(() => createConversationPreferences())
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([])
   const [conversationId, setConversationId] = useState<string | undefined>()
+  const [relaxationPause, setRelaxationPause] = useState<RelaxationPause | undefined>()
   // Bumped on every reset, so a turn still in flight can't bring back the conversation that was just forgotten.
   const conversationGeneration = useRef(0)
   const [conversationStatus, setConversationStatus] = useState<'idle' | 'thinking'>('idle')
@@ -101,6 +106,14 @@ function App() {
   const [locale, setLocale] = useState<Locale>(() => resolveLocale(localStorage.getItem('reel-circle-locale'), navigator.language))
   const [showOnboarding, setShowOnboarding] = useState(() => localStorage.getItem('reel-circle-onboarding') !== 'done')
   const t = (key: Parameters<typeof translate>[1]) => translate(locale, key)
+  const describePause = (pause: RelaxationPause) => describeRelaxation(pause, locale, (value) => displayValue(locale, value))
+  const agentReply = (result: AgentApiResponse) => {
+    if (result.pause) return describePause(result.pause)
+    if (result.nothingFits) return describeNothingFits(result.nothingFits, locale)
+    return result.clarificationQuestion ?? (result.recommendations.length
+      ? `I used ${result.meta.trace.length} agent steps to find ${result.recommendations.length} strong matches. ${result.recommendations[0].explanation}`
+      : nothingFitsYet)
+  }
   const [hydrated, setHydrated] = useState(false)
   const [catalogSource, setCatalogSource] = useState<'curated' | 'cached' | 'live'>('curated')
   const [catalogLoading, setCatalogLoading] = useState(Boolean(import.meta.env.VITE_MOVIE_API_URL))
@@ -635,10 +648,13 @@ function App() {
     turnProfiles = profiles,
     startingPreferences = conversationPreferences,
     activeConversationId = conversationId,
+    decision?: RelaxationDecision,
   ) => {
     const prompt = suggestedPrompt ?? constraintPrompt
     if (!prompt.trim() || conversationStatus === 'thinking') return
     setConversationStatus('thinking')
+    // Any turn ends the pause on the server: a decision answers it, a new message replaces it.
+    setRelaxationPause(undefined)
     const generation = conversationGeneration.current
     const apiUrl = import.meta.env.VITE_MOVIE_API_URL as string | undefined
     let next = updateConversationPreferences(startingPreferences, prompt)
@@ -646,15 +662,16 @@ function App() {
     let selectedMovieId: string | undefined
     if (apiUrl) {
       try {
-        const result = await requestAgentTurn(apiUrl, prompt, startingPreferences, movieCatalog, turnProfiles, { conversationId: activeConversationId })
+        const result = await requestAgentTurn(apiUrl, prompt, startingPreferences, movieCatalog, turnProfiles, { conversationId: activeConversationId, decision })
         next = result.preferences
-        if (generation === conversationGeneration.current) setConversationId(result.conversationId)
+        if (generation === conversationGeneration.current) {
+          setConversationId(result.conversationId)
+          setRelaxationPause(result.pause)
+        }
         setLatestAgentMeta(result.meta)
         selectedMovieId = result.recommendations[0]?.movie.id
         setAgentExplanations(Object.fromEntries(result.recommendations.map(({ movie, explanation }) => [movie.id, explanation])))
-        reply = result.clarificationQuestion ?? (result.recommendations.length
-          ? `I used ${result.meta.trace.length} agent steps to find ${result.recommendations.length} strong matches. ${result.recommendations[0].explanation}`
-          : 'Nothing fits every hard constraint yet. Tell me which detail matters least and I will widen that boundary.')
+        reply = agentReply(result)
         setFeedbackNotice(`${result.meta.extractionMode === 'model' ? 'LLM' : 'Deterministic'} agent · ${result.meta.durationMs} ms · ${result.meta.trace.length} steps`)
       } catch {
         setLatestAgentMeta(null)
@@ -677,7 +694,7 @@ function App() {
     const nextCount = scoreCandidates(movieCatalog, turnProfiles, next).length
     reply ??= nextCount
       ? `I found ${nextCount} matches and kept your earlier preferences in the mix. You can refine these without starting over.`
-      : 'Nothing fits every hard constraint yet. Tell me which detail matters least and I will widen that boundary.'
+      : nothingFitsYet
     const timestamp = Date.now()
     const newMessages: ConversationMessage[] = [
       { id: crypto.randomUUID(), role: 'user', content: prompt, timestamp },
@@ -690,12 +707,19 @@ function App() {
     setConversationStatus('idle')
   }
 
+  /** Answers the agent's relaxation proposal; the server loosens the constraint or offers the next one. */
+  const answerRelaxation = (decision: RelaxationDecision) => {
+    const message = t(decision === 'accept' ? 'acceptRelaxationMessage' : 'keepConstraintMessage')
+    void applyConstraintPrompt(message, profiles, conversationPreferences, conversationId, decision)
+  }
+
   /** Starts a new conversation and asks the server to forget the old one (it also expires after 30 days). */
   const forgetServerConversation = async () => {
     const apiUrl = import.meta.env.VITE_MOVIE_API_URL as string | undefined
     const forgotten = conversationId
     conversationGeneration.current += 1
     setConversationId(undefined)
+    setRelaxationPause(undefined)
     if (!apiUrl || !forgotten) return
     try {
       await deleteAgentConversation(apiUrl, forgotten)
@@ -905,6 +929,11 @@ function App() {
         <div className="simple-guide"><strong>{locale === 'es' ? 'Dilo con tus palabras' : 'Say it naturally'}</strong><span>{locale === 'es' ? 'El agente busca, compara y explica. Después puedes pedir cambios.' : 'The agent searches, compares, and explains. Then you can ask for changes.'}</span></div>
         {conversationMessages.length > 0 && <div className="conversation-thread" aria-live="polite">
           {conversationMessages.slice(-4).map((message) => <div className={`conversation-message ${message.role}`} key={message.id}><span>{message.role === 'agent' ? <Sparkles size={13} /> : <Users size={13} />}</span><p>{message.content}</p></div>)}
+        </div>}
+        {relaxationPause && <div className="relaxation-proposal" role="group" aria-label={t('agentProposal')}>
+          <p>{describePause(relaxationPause)}</p>
+          <button type="button" onClick={() => answerRelaxation('accept')} disabled={conversationStatus === 'thinking'}><CheckCircle2 size={14} /> {t('acceptRelaxation')}</button>
+          <button type="button" className="secondary" onClick={() => answerRelaxation('reject')} disabled={conversationStatus === 'thinking'}>{t('keepConstraint')}</button>
         </div>}
         <div className="agent-command">
           <MessageSquareText size={19} />

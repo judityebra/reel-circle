@@ -12,6 +12,20 @@ const candidates: Movie[] = [
 
 const originalApiKey = process.env.OPENAI_API_KEY
 
+/** A fetcher that answers like the agent service, plus `extra` fields, and remembers what was sent. */
+function recordingFetcher(extra: Record<string, unknown> = {}) {
+  let body = ''
+  const fetcher = async (_input: string, init: RequestInit) => {
+    body = String(init.body)
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ preferences: createConversationPreferences(), recommendations: [], meta: { extractionMode: 'deterministic', durationMs: 1, trace: [] }, ...extra }),
+    }
+  }
+  return { fetcher, sentBody: () => body }
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
   if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY
@@ -96,15 +110,7 @@ describe('agent API', () => {
   })
 
   it('strips raw ratings and watch history from client requests', async () => {
-    let requestBody = ''
-    const fetcher = async (_input: string, init: RequestInit) => {
-      requestBody = String(init.body)
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ preferences: createConversationPreferences(), recommendations: [], meta: { extractionMode: 'deterministic', durationMs: 1, trace: [] } }),
-      }
-    }
+    const { fetcher, sentBody } = recordingFetcher()
     const privateProfile = {
       id: 'private', name: 'Private', color: '#000', preferredGenres: ['Drama'],
       ratings: [{ title: 'Secret rating', rating: 5 }], watched: [{ title: 'Secret watch' }],
@@ -112,24 +118,24 @@ describe('agent API', () => {
 
     await requestAgentTurn('/api', 'Something gentle', createConversationPreferences(), candidates, [privateProfile], { fetcher })
 
-    expect(requestBody).not.toContain('Secret rating')
-    expect(requestBody).not.toContain('Secret watch')
-    expect(JSON.parse(requestBody).profiles[0]).toMatchObject({ ratings: [], watched: [] })
+    expect(sentBody()).not.toContain('Secret rating')
+    expect(sentBody()).not.toContain('Secret watch')
+    expect(JSON.parse(sentBody()).profiles[0]).toMatchObject({ ratings: [], watched: [] })
   })
 
   it('sends the conversation id so the server remembers the conversation', async () => {
-    let requestBody = ''
-    const fetcher = async (_input: string, init: RequestInit) => {
-      requestBody = String(init.body)
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ conversationId: 'conv-1', preferences: createConversationPreferences(), recommendations: [], meta: { extractionMode: 'deterministic', durationMs: 1, trace: [] } }),
-      }
-    }
+    const { fetcher, sentBody } = recordingFetcher({ conversationId: 'conv-1' })
     const result = await requestAgentTurn('/api', 'Something gentle', createConversationPreferences(), candidates, [], { conversationId: 'conv-1', fetcher })
-    expect(JSON.parse(requestBody).conversationId).toBe('conv-1')
+    expect(JSON.parse(sentBody()).conversationId).toBe('conv-1')
     expect(result.conversationId).toBe('conv-1')
+  })
+
+  it('answers a relaxation proposal with the user decision and returns the next pause', async () => {
+    const pause = { type: 'relaxation', constraint: 'maxRuntime', from: 90, to: 105 }
+    const { fetcher, sentBody } = recordingFetcher({ conversationId: 'conv-1', pause })
+    const result = await requestAgentTurn('/api', 'No, keep the year', createConversationPreferences(), candidates, [], { conversationId: 'conv-1', decision: 'reject', fetcher })
+    expect(JSON.parse(sentBody()).decision).toBe('reject')
+    expect(result.pause).toEqual(pause)
   })
 
   it('asks the server to forget a conversation', async () => {

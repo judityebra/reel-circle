@@ -30,6 +30,16 @@ The browser limits candidates to 250 and profiles to 12. Profiles contain prefer
 4. `rank_candidates`: blend semantic similarity with Reel Circle's explainable group scorer.
 5. `validate_results`: verify excluded genres and runtime limits before returning recommendations.
 
+## Relaxation pause (Python service only)
+
+When nothing in the candidate pool meets every hard constraint, the Python service pauses instead of returning an empty list. The response has `recommendations: []` and a `pause` that proposes loosening one hard constraint, in the order year range, languages, requested genres, max runtime (+15 minutes per step), platforms. Excluded genres are never proposed.
+
+```json
+{ "pause": { "type": "relaxation", "constraint": "yearRange", "from": [1990, 1999], "to": null } }
+```
+
+The browser answers on the same `conversationId` with `"decision": "accept"` or `"decision": "reject"`. Accept loosens the constraint and filters again; reject keeps it and offers the next one. After the last rejection the response carries `"nothingFits": { "tightestConstraint": "yearRange" }` instead of a pause. A turn without a decision ends any pause and runs as a normal turn. A turn stops after 12 graph steps and ends its trace with a `step_limit` step. The proxy forwards `decision` only when it is `accept` or `reject`.
+
 ## Response
 
 ```json
