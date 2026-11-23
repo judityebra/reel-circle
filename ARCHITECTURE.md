@@ -48,9 +48,32 @@ After hard filtering, the agent embeds each movie's synopsis, genres, keywords, 
 
 Raw Letterboxd ratings and watched-film history are stripped by the client adapter. The server receives bounded movie candidates and privacy-safe learned preference weights.
 
-## Agent loop
+## Recommendation agent (Python LangGraph service)
 
-The agent follows a bounded plan-act-observe policy with at most eight steps. It can parse constraints, request active-learning input, train the GCN, compare models, request constraint relaxation, and propose a final pick. Constraint relaxation and final selection require explicit approval.
+`agent-service/` runs the recommendation agent as one LangGraph graph ([ADR 0003](docs/adr/0003-one-graph-not-a-multi-agent-system.md)). `/api/agent` forwards each turn there when `AGENT_SERVICE_URL` is set and falls back to the TypeScript pipeline on any failure.
+
+```mermaid
+flowchart LR
+    Turn[Conversation turn] --> Extract[extract_preferences]
+    Extract -->|model found nothing usable| Ask[ask_clarifying_question]
+    Ask -->|pause: the reply is a new turn| Done((end))
+    Extract --> Filter[filter_candidates]
+    Filter -->|nothing fits| Relax[propose_relaxation]
+    Relax -->|pause: accept or reject| Filter
+    Filter --> Semantic[semantic_retrieval]
+    Semantic --> Rank[rank_candidates]
+    Rank --> Validate[validate_results]
+    Validate --> Respond[respond]
+```
+
+- **Pauses** are `interrupt()`s. A relaxation is resumed with the user's decision, and only if the decision names the pending proposal; a clarifying question is never resumed, because the reply is a new turn. Any new message ends a pause.
+- **Memory** is one checkpointed thread per conversation (in memory, SQLite or Postgres). Following [ADR 0002](docs/adr/0002-server-state-holds-preferences-only.md), only typed preferences and turn metadata are stored: the turn's input travels in the run config, intermediate results are untracked channels, and a test reads the raw SQLite file to prove the message, persons and candidate pool never reach storage.
+- **Outside services** (the chat model, the embedding provider, Qdrant) come in through FastAPI dependencies and the run config, so tests swap in fakes, and each falls back on its own.
+- **Parity:** `fixtures/agent-parity.json` freezes the TypeScript pipeline's output; the Python service reproduces every turn exactly.
+
+## Lab agent loop
+
+The in-browser lab agent follows a bounded plan-act-observe policy with at most eight steps. It can parse constraints, request active-learning input, train the GCN, compare models, request constraint relaxation, and propose a final pick. Constraint relaxation and final selection require explicit approval.
 
 ## Recommendation layers
 
@@ -71,4 +94,4 @@ TMDB discovery is paginated through the browser in bounded 20-film server calls.
 
 ## Production service boundary
 
-The deployment remains local-first and includes optional hosted LLM extraction, OpenAI-compatible embeddings, and Qdrant persistence behind `/api/agent`. Each capability falls back independently: model extraction to deterministic parsing, embeddings to local vectors, and Qdrant to in-memory cosine search. The next backend phase should add durable conversation checkpoints and incremental background indexing so unchanged movies are not re-embedded on each request.
+The deployment remains local-first and includes optional hosted LLM extraction, OpenAI-compatible embeddings, and Qdrant persistence behind `/api/agent`. Each capability falls back independently: model extraction to deterministic parsing, embeddings to local vectors, and Qdrant to in-memory cosine search. Durable conversation checkpoints now live in the Python service. The next backend phase should add incremental background indexing so unchanged movies are not re-embedded on each request.

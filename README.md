@@ -14,15 +14,16 @@ The default experience is a focused decision dashboard. The optional AI lab expo
 
 ## Technical highlights
 
-- **Stack:** React 19, TypeScript, Vite, TensorFlow.js, React Flow, IndexedDB, Vitest, and Playwright.
+- **Stack:** React 19, TypeScript, Vite, TensorFlow.js, React Flow, IndexedDB, Vitest, and Playwright; a Python recommendation agent with FastAPI, LangGraph, LangChain and LangSmith.
 - **Privacy:** Letterboxd files and learned preferences stay in the browser; shared room links omit viewing history and raw ratings.
 - **Recommendation system:** deterministic ranking plus confidence-weighted MLP and two-layer GCN prototypes.
 - **Group fairness:** balanced, average, least-misery, and Nash aggregation strategies.
-- **Agent safety:** an eight-step bounded plan-act-observe loop with typed tools, persistent traces, and approval gates.
-- **Conversation memory:** typed session preferences preserve exclusions and refinements without storing personal data on a server.
-- **Server agent:** optional OpenAI-compatible structured extraction with deterministic fallback, candidate tools, validation, latency, and trace metadata.
+- **Lab agent:** an eight-step bounded plan-act-observe loop in the browser with typed tools, persistent traces, and approval gates.
+- **Recommendation agent:** a LangGraph graph (extract, filter, semantic retrieval, rank, validate) that reproduces the TypeScript pipeline exactly, pauses with `interrupt()` to ask a clarifying question or to propose loosening one hard constraint, and falls back to the TypeScript pipeline if the service is down.
+- **Conversation memory:** one checkpointed thread per conversation (memory, SQLite or Postgres) that stores typed preferences only; the message, persons and candidate pool never reach storage, and conversations expire after 30 days.
+- **Model extraction:** gpt-4.1-mini by default, Claude or Gemini by configuration, with JSON-schema structured output, bounded retries inside a time budget, and rule-based fallback.
 - **Semantic retrieval:** rich TMDB documents, native Gemini or OpenAI-compatible embeddings, and optional Qdrant search rerank valid candidates for vibe-based requests.
-- **Quality:** 110 unit tests, an end-to-end movie-night workflow, ESLint, production builds, dependency auditing, and an extraction-accuracy gate in CI.
+- **Quality:** 212 TypeScript and 141 Python tests, 9 Playwright flows, parity fixtures shared by both languages, ESLint and ruff, production and Docker builds, dependency auditing, and an extraction-accuracy gate in CI.
 - **Evaluation:** a seeded synthetic benchmark comparing every recommender and group strategy with NDCG@10, Precision@10 and Spearman (95% CIs), plus a bilingual preference-extraction eval. See [docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## Project documentation
@@ -95,13 +96,13 @@ Successful live catalogs are cached in IndexedDB for 24 hours and rendered immed
 
 ## Optional LLM agent
 
-`POST /api/agent` accepts a conversation turn, current typed preferences, privacy-safe profile weights, and bounded movie candidates. It performs structured preference extraction, filtering, ranking, and hard-constraint validation. Set `OPENAI_API_KEY` and optionally `OPENAI_MODEL` or `OPENAI_BASE_URL` in the server environment to enable model extraction. Without those variables, the endpoint remains functional through deterministic extraction.
+`POST /api/agent` accepts a conversation turn, current typed preferences, privacy-safe profile weights, and bounded movie candidates. It performs structured preference extraction, filtering, ranking, and hard-constraint validation, and can pause to ask a clarifying question or to propose loosening a hard constraint. Set `OPENAI_API_KEY` and optionally `OPENAI_MODEL` or `OPENAI_BASE_URL` in the server environment to enable model extraction. Without those variables, the endpoint remains functional through deterministic extraction.
 
 The browser never receives the model key and strips raw ratings and watched-film history before calling the agent. See [docs/AGENT_API.md](docs/AGENT_API.md) for the contract.
 
 ### Python recommendation agent
 
-The recommendation agent is being ported to a Python LangGraph service in [`agent-service/`](agent-service/README.md). Set the server-only `AGENT_SERVICE_URL` (for example `http://127.0.0.1:8000` with `uv run uvicorn reel_circle_agent.api:app`) and `/api/agent` forwards each turn there. On an HTTP error, an invalid answer, a network failure or a timeout (`AGENT_SERVICE_TIMEOUT_MS`, default 4000) it answers with the TypeScript pipeline instead, and `meta.agentService` records which one answered and why. Without the variable, nothing changes.
+The recommendation agent runs as a Python LangGraph service in [`agent-service/`](agent-service/README.md); see [ADR 0003](docs/adr/0003-one-graph-not-a-multi-agent-system.md) for why it is one graph. Set the server-only `AGENT_SERVICE_URL` (for example `http://127.0.0.1:8000` with `uv run uvicorn reel_circle_agent.api:app`) and `/api/agent` forwards each turn there. On an HTTP error, an invalid answer, a network failure or a timeout (`AGENT_SERVICE_TIMEOUT_MS`, default 4000) it answers with the TypeScript pipeline instead, and `meta.agentService` records which one answered and why. Without the variable, nothing changes.
 
 ## Import Letterboxd data
 
@@ -131,7 +132,7 @@ Shared room links are asynchronous snapshots, not real-time collaboration. They 
 
 ## Roadmap boundary
 
-The repository currently implements a typed server agent with optional hosted LLM extraction, OpenAI-compatible embeddings, Qdrant retrieval, deterministic fallbacks, local neural ranking, TMDB tools, stateful conversation memory, evaluation, and observable traces. LangGraph persistence and incremental background indexing remain planned backend phases. Credentials stay server-side.
+The repository implements a Python LangGraph recommendation agent with server-side conversation memory, clarifying-question and relaxation pauses, optional hosted LLM extraction (OpenAI, Claude or Gemini), provider embeddings, Qdrant retrieval and independent fallbacks, plus a TypeScript fallback pipeline, local neural ranking, TMDB tools, evaluation, and observable traces. Still planned: an agent evaluation harness (LangSmith, then Langfuse), deploying the Python service, and incremental background indexing. Credentials stay server-side.
 
 The Experiment Lab provides local backup and delete-all-data controls. Delete removes profiles, ratings, model outputs, traces, and cached catalog data. TMDB metadata and images require TMDB attribution; the application footer includes the required non-endorsement notice.
 
@@ -142,4 +143,8 @@ npm test
 npm run test:e2e
 npm run lint
 npm run build
+
+cd agent-service
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
 ```
