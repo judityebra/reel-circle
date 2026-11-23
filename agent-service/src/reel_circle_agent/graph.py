@@ -2,6 +2,8 @@
 
     extract_preferences -> filter_candidates -> semantic_retrieval -> rank_candidates
         -> validate_results -> respond
+    extract_preferences --model found nothing usable--> ask_clarifying_question --pause-->
+        (the user's reply arrives as a new turn)
     filter_candidates --nothing fits--> propose_relaxation --pause--> (user decides)
         accept: loosen one hard constraint -> filter_candidates
         reject: keep it -> filter_candidates -> next proposal, or "nothing fits"
@@ -74,6 +76,7 @@ class TurnState(TypedDict, total=False):
     rejected_relaxations: list[str]
     # Per run only.
     clarifying_question: Annotated[str | None, UntrackedValue]
+    needs_clarification: Annotated[bool, UntrackedValue]
     ranked: Annotated[list[Recommendation], UntrackedValue]
     candidates_meeting_constraints: Annotated[int, UntrackedValue]
     semantic: Annotated[dict[str, Any], UntrackedValue]
@@ -124,6 +127,11 @@ def _next_relaxation(state: TurnState, config: RunnableConfig) -> Proposal | Non
     return next_relaxation(state["preferences"], rejected, _turn(config)["candidate_pool"])
 
 
+def _adds_anything(extracted: dict[str, Any]) -> bool:
+    """Whether the model found at least one hard constraint or preference in the turn."""
+    return any(value for key, value in extracted.items() if key != "clarificationQuestion")
+
+
 def _new_turn(now: int) -> dict[str, Any]:
     """Turn metadata that every new message resets, which also ends any pending pause."""
     return {"last_turn_at": now, "rejected_relaxations": []}
@@ -139,10 +147,12 @@ async def extract_preferences(state: TurnState, config: RunnableConfig) -> NodeR
         settings.get("chat_model"), turn["message"], current, settings.get("model_retry", DEFAULT_RETRY_POLICY)
     )
     if outcome.extracted is not None:
+        question = outcome.extracted["clarificationQuestion"]
         update = {
             "preferences": merge_model_extraction(current, outcome.extracted, now),
             "extraction": {"mode": "model", "status": outcome.status},
-            "clarifying_question": outcome.extracted["clarificationQuestion"],
+            "clarifying_question": question,
+            "needs_clarification": bool(question) and not _adds_anything(outcome.extracted),
         }
         return {**update, **_new_turn(now)}, "completed", "model structured extraction"
     update = {
@@ -150,6 +160,17 @@ async def extract_preferences(state: TurnState, config: RunnableConfig) -> NodeR
         "extraction": {"mode": "deterministic", "status": outcome.status, "error": outcome.error},
     }
     return {**update, **_new_turn(now)}, "completed", "deterministic structured extraction"
+
+
+async def ask_clarifying_question(state: TurnState, config: RunnableConfig) -> NodeResult:
+    """Pauses with the model's question. The reply comes back as a new turn, which ends the pause;
+    so a turn asks at most once, and only when a model interpreted it."""
+    interrupt({"type": "clarifying_question", "question": state["clarifying_question"]})
+    return {}, "completed", "clarifying question answered"
+
+
+def route_after_extract(state: TurnState, config: RunnableConfig) -> str:
+    return "ask_clarifying_question" if state.get("needs_clarification") else "filter_candidates"
 
 
 async def filter_candidates(state: TurnState, config: RunnableConfig) -> NodeResult:
@@ -286,6 +307,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     graph = StateGraph(TurnState)
     for step in [
         extract_preferences,
+        ask_clarifying_question,
         filter_candidates,
         propose_relaxation,
         semantic_retrieval,
@@ -295,7 +317,10 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
         graph.add_node(step.__name__, _traced(step))
     graph.add_node("respond", respond)
     graph.add_edge(START, "extract_preferences")
-    graph.add_edge("extract_preferences", "filter_candidates")
+    graph.add_conditional_edges(
+        "extract_preferences", route_after_extract, ["ask_clarifying_question", "filter_candidates"]
+    )
+    graph.add_edge("ask_clarifying_question", "filter_candidates")
     graph.add_conditional_edges("filter_candidates", route_after_filter, ["propose_relaxation", "semantic_retrieval"])
     graph.add_edge("propose_relaxation", "filter_candidates")
     graph.add_edge("semantic_retrieval", "rank_candidates")
