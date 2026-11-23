@@ -1,5 +1,6 @@
 """HTTP API of the recommendation agent: the same request and response shape as the TypeScript `/api/agent`.
 
+Model extraction is configured with AGENT_MODEL or OPENAI_API_KEY (see model_extraction.py).
 LangSmith tracing is off unless LANGSMITH_TRACING=true and LANGSMITH_API_KEY are set; LangGraph
 then traces every node of every turn.
 """
@@ -14,8 +15,10 @@ import certifi
 import httpx
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
+from langchain_core.language_models import BaseChatModel
 
 from .graph import TurnInput, recommendation_agent
+from .model_extraction import configured_chat_model
 
 app = FastAPI(title="Reel Circle recommendation agent")
 
@@ -71,7 +74,9 @@ async def agent_method_not_allowed() -> JSONResponse:
 
 @app.post("/agent")
 async def agent_turn(
-    request: Request, transport: Annotated[httpx.AsyncBaseTransport | None, Depends(outbound_transport)]
+    request: Request,
+    transport: Annotated[httpx.AsyncBaseTransport | None, Depends(outbound_transport)],
+    chat_model: Annotated[BaseChatModel | None, Depends(configured_chat_model)],
 ) -> JSONResponse:
     try:
         body = json.loads(await request.body())
@@ -81,5 +86,7 @@ async def agent_turn(
     if turn is None:
         return JSONResponse(_BAD_MESSAGE, status_code=400)
     async with httpx.AsyncClient(transport=transport, timeout=_OUTBOUND_TIMEOUT, verify=_OUTBOUND_SSL) as client:
-        result = await recommendation_agent.ainvoke(turn, config={"configurable": {"http_client": client}})
+        result = await recommendation_agent.ainvoke(
+            turn, config={"configurable": {"http_client": client, "chat_model": chat_model}}
+        )
     return JSONResponse(result["response"], headers={"Cache-Control": "no-store"})
