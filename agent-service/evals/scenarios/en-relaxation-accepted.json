@@ -1,0 +1,79 @@
+{
+  "id": "en-relaxation-accepted",
+  "lang": "en",
+  "tags": [
+    "multi-turn",
+    "relaxation",
+    "year-range"
+  ],
+  "candidatePool": [
+    {
+      "id": "memories",
+      "title": "Memories of Murder",
+      "year": 2003,
+      "runtime": 131,
+      "genres": [
+        "Thriller",
+        "Crime"
+      ],
+      "platforms": [
+        "Netflix"
+      ],
+      "rating": 4.3,
+      "language": "Korean"
+    },
+    {
+      "id": "clue",
+      "title": "Clue",
+      "year": 1985,
+      "runtime": 94,
+      "genres": [
+        "Comedy",
+        "Mystery"
+      ],
+      "platforms": [
+        "Filmin"
+      ],
+      "rating": 3.8,
+      "language": "English"
+    }
+  ],
+  "turns": [
+    {
+      "message": "A Korean thriller from the 1990s",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates"
+        ],
+        "pause": "relaxation",
+        "results": {
+          "count": 0
+        }
+      }
+    },
+    {
+      "decision": "accept",
+      "message": "Yes, any year is fine",
+      "expect": {
+        "path": [
+          "propose_relaxation",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "preferences": {
+          "languages": [
+            "ko"
+          ]
+        },
+        "results": {
+          "top": [
+            "memories"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -97,6 +97,33 @@ built-ins are reproduced exactly in `js_compat.py` (`Math.round`, `toFixed`, lef
 summation, 32-bit hashing). If the TypeScript behaviour changes on purpose, regenerate the fixtures
 with `npm run fixtures:parity` and port the change.
 
+## Agent evaluation
+
+`uv run reel-eval` replays the scenarios in `evals/scenarios/` (scripted multi-turn conversations in
+English and Spanish) through the agent's HTTP endpoint and prints a scorecard. Every turn is scored
+by plain evaluators in `reel_circle_agent/evaluation/evaluators.py`: the **path** (expected nodes,
+the expected pause or none, no step limit) and the **final answer** (no recommendation breaks a hard
+constraint, earlier exclusions kept, the expected preferences, results or nothing-fits). A turn
+succeeds only if every evaluator passes, and a scenario only if every turn succeeds (GLOSSARY.md).
+The run is deterministic and CI fails if any scenario fails.
+
+A scenario is one JSON file:
+
+```json
+{
+  "id": "en-exclusion-kept-across-turns",
+  "lang": "en",
+  "tags": ["multi-turn", "exclusions"],
+  "turns": [
+    {"message": "No horror tonight", "expect": {"excludes": ["Horror"], "results": {"min": 3}}},
+    {"message": "Something under two hours", "expect": {"excludes": ["Horror"], "preferences": {"maxRuntime": 120}}}
+  ]
+}
+```
+
+A turn with `"decision": "accept"` or `"reject"` answers the pause of the turn before. `candidatePool`
+and `persons` default to the shared parity fixtures.
+
 ## Tracing
 
 LangSmith tracing is off by default. Set these to trace every node of every turn:

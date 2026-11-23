@@ -43,6 +43,8 @@ jobs:
       - run: uv run ruff format --check .
       # Includes parity with the TypeScript pipeline over fixtures/agent-parity.json.
       - run: uv run pytest
+      # Agent scorecard: every deterministic scenario must pass (agent-service/README.md, Agent evaluation).
+      - run: uv run reel-eval
       - run: docker build -t reel-circle-agent .
       - name: Container answers its health check
         run: |

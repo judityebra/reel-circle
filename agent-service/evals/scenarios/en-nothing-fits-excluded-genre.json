@@ -1,0 +1,43 @@
+{
+  "id": "en-nothing-fits-excluded-genre",
+  "lang": "en",
+  "tags": [
+    "single-turn",
+    "nothing-fits",
+    "exclusions"
+  ],
+  "candidatePool": [
+    {
+      "id": "hereditary",
+      "title": "Hereditary",
+      "year": 2018,
+      "runtime": 127,
+      "genres": [
+        "Horror"
+      ],
+      "platforms": [
+        "Filmin"
+      ],
+      "rating": 4.0,
+      "language": "English"
+    }
+  ],
+  "turns": [
+    {
+      "message": "No horror please",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "count": 0
+        },
+        "nothingFits": "excludedGenres"
+      }
+    }
+  ]
+}
