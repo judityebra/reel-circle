@@ -7,6 +7,9 @@
     "single-turn"
   ],
   "knownIssue": "#33",
+  "knownFailure": [
+    "unexpected preferences: languages"
+  ],
   "turns": [
     {
       "message": "Una película coreana",

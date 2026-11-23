@@ -7,9 +7,12 @@
     "multi-turn"
   ],
   "knownIssue": "#33",
+  "knownFailure": [
+    "lost exclusions: Horror"
+  ],
   "turns": [
     {
-      "message": "We're 4 people for movie night with 4 friends",
+      "message": "Movie night for 4 people",
       "expect": {
         "path": [
           "extract_preferences",

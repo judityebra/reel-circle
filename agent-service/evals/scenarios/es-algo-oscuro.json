@@ -8,6 +8,9 @@
     "vibe"
   ],
   "knownIssue": "#33",
+  "knownFailure": [
+    "unexpected preferences: moods"
+  ],
   "turns": [
     {
       "message": "Algo oscuro",

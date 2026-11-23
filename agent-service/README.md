@@ -129,9 +129,10 @@ movie, a pause or an honest nothing-fits.
 - `model`: a list of scripted extractions, one per turn the agent asks the chat model; used for the
   clarifying question without calling a real model.
 - `tags`: the scorecard breaks results down by tag (language, pause, constraint, multi-turn, ...).
-- `knownIssue`: an issue reference for behaviour the agent is known to get wrong. The scenario still
-  runs and is listed under "Known issues", but doesn't fail CI; once it passes, the scorecard says to
-  remove the marker. Today three parser gaps are tracked this way (#33).
+- `knownIssue` + `knownFailure`: an issue reference for behaviour the agent is known to get wrong, and
+  the failure reason it is known for. The scenario still runs and is listed under "Known issues", out of
+  every gating count; if it fails for any other reason it fails CI, and once it passes the scorecard
+  says to remove the marker. Today three parser gaps are tracked this way (#33).
 
 ## Tracing
 
