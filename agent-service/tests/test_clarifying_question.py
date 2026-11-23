@@ -121,3 +121,37 @@ def test_a_model_that_falls_back_never_asks():
         app.dependency_overrides.pop(configured_chat_model, None)
     assert "pause" not in body
     assert body["meta"]["modelStatus"] == "failed"
+
+
+def test_a_turn_that_only_repeats_earlier_preferences_still_asks(model):
+    model({**NOTHING, "genres": ["Comedy"]}, {**NOTHING, "genres": ["Comedy"], "clarificationQuestion": QUESTION})
+    with TestClient(app) as client:
+        first = _turn(client, "something funny")
+        body = _turn(client, "hmm, whatever", first["conversationId"])
+    assert body["pause"] == {"type": "clarifying_question", "question": QUESTION}
+
+
+def test_group_size_or_occasion_alone_is_not_enough_to_choose(model):
+    model({**NOTHING, "peopleCount": 4, "viewingContext": "movie-night", "clarificationQuestion": QUESTION})
+    with TestClient(app) as client:
+        body = _turn(client, "movie night for four")
+    assert body["pause"]["type"] == "clarifying_question"
+    assert body["preferences"]["peopleCount"] == 4  # still remembered for the next turn
+
+
+def test_a_decision_never_resumes_a_clarifying_question(model):
+    model({**NOTHING, "clarificationQuestion": QUESTION}, {**NOTHING, "genres": ["Comedy"]})
+    with TestClient(app) as client:
+        paused = _turn(client, "hmm, not sure")
+        response = client.post(
+            "/agent",
+            json={
+                "message": "Something light",
+                "conversationId": paused["conversationId"],
+                "candidates": MOVIES,
+                "decision": "accept",
+                "answering": {},
+            },
+        )
+    assert response.status_code == 200
+    assert response.json()["preferences"]["genres"] == ["Comedy"]

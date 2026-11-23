@@ -2,7 +2,7 @@ import type { ConversationPreferences } from './constraints'
 import type { Movie, Profile } from './recommendation'
 
 export interface AgentApiStep {
-  tool: 'extract_preferences' | 'filter_candidates' | 'semantic_retrieval' | 'rank_candidates' | 'validate_results' | 'ask_clarifying_question' | 'propose_relaxation' | 'step_limit'
+  tool: 'extract_preferences' | 'filter_candidates' | 'semantic_retrieval' | 'rank_candidates' | 'validate_results' | 'propose_relaxation' | 'step_limit'
   status: 'completed' | 'skipped'
   durationMs: number
   observation: string
@@ -32,10 +32,11 @@ export const isRelaxationDecision = (value: unknown): value is RelaxationDecisio
 
 const relaxableConstraints: readonly string[] = ['yearRange', 'languages', 'genres', 'maxRuntime', 'platforms']
 
+const isClarifyingPause = (value: unknown): value is ClarifyingPause => !!value && typeof value === 'object'
+  && (value as Record<string, unknown>).type === 'clarifying_question' && typeof (value as Record<string, unknown>).question === 'string'
+
 /** Whether a value is a pause the browser can render: a relaxation proposal or a clarifying question. */
-const isAgentPause = (value: unknown): value is AgentPause => isRelaxationPause(value)
-  || (!!value && typeof value === 'object' && (value as Record<string, unknown>).type === 'clarifying_question'
-    && typeof (value as Record<string, unknown>).question === 'string')
+const isAgentPause = (value: unknown): value is AgentPause => isRelaxationPause(value) || isClarifyingPause(value)
 
 /** Whether a value is a relaxation proposal the browser can render and answer. */
 export const isRelaxationPause = (value: unknown): value is RelaxationPause => {
