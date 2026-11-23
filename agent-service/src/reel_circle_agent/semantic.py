@@ -1,14 +1,13 @@
-"""Local semantic retrieval (port of src/lib/semantic-retrieval.ts and the local path of api/semantic-service.ts).
+"""Local semantic vectors, lexical evidence and the bounded rerank (port of src/lib/semantic-retrieval.ts).
 
 Without an embedding provider, the query and each movie become 384-dimension hashed bag-of-words
 vectors. Semantic similarity is worth a bounded 28% of the final score, so vibe phrases can reorder
-movies that meet the hard constraints but never bring back one that doesn't. Embedding providers
-and Qdrant arrive in a later ticket.
+movies that meet the hard constraints but never bring back one that doesn't. Provider embeddings
+and Qdrant (retrieval.py) feed the same rerank.
 """
 
 import math
 import re
-from typing import Any
 
 from .js_compat import js_int32, js_round, js_sum, strip_accents_lower, unique
 from .scoring import Movie, Recommendation
@@ -76,11 +75,13 @@ def semantic_vector(value: str) -> list[float]:
     return [item / magnitude for item in vector]
 
 
-def _cosine(left: list[float], right: list[float]) -> float:
+def cosine(left: list[float], right: list[float]) -> float:
+    """Similarity of two unit vectors, floored at zero."""
     return max(0.0, js_sum(a * b for a, b in zip(left, right, strict=True)))
 
 
 def movie_document(movie: Movie) -> str:
+    """The text a movie is embedded and matched by."""
     parts = [
         movie.get("title"),
         movie.get("overview"),
@@ -95,27 +96,29 @@ def movie_document(movie: Movie) -> str:
     return " ".join(part for part in parts if part)
 
 
-def retrieve_semantically(query: str, recommendations: list[Recommendation]) -> dict[str, Any]:
-    """Reranks recommendations by similarity to the user's message, with local vectors."""
-    query_vector = semantic_vector(query)
-    query_terms = _expand(_tokenize(query))
+def matched_terms(query: str, movie: Movie) -> list[str]:
+    """The query's (concept-expanded) terms that also appear in the movie's document."""
+    document_terms = set(_expand(_tokenize(movie_document(movie))))
+    return [term for term in _expand(_tokenize(query)) if term in document_terms]
+
+
+def rerank(
+    recommendations: list[Recommendation], scores: dict[str, float], terms: dict[str, list[str]]
+) -> list[Recommendation]:
+    """Blends each movie's semantic score (0-1) into its group score at a bounded 28%, best first.
+
+    A movie missing from `scores` counts as no semantic match and shows no matched terms.
+    """
     reranked = []
     for recommendation in recommendations:
-        document = movie_document(recommendation["movie"])
-        document_terms = set(_expand(_tokenize(document)))
-        semantic_score = js_round(_cosine(query_vector, semantic_vector(document)) * 100)
+        movie_id = recommendation["movie"]["id"]
+        semantic_score = js_round(scores.get(movie_id, 0) * 100)
         reranked.append(
             {
                 **recommendation,
                 "score": js_round(recommendation["score"] * 0.72 + semantic_score * 0.28),
                 "semanticScore": semantic_score,
-                "semanticTerms": [term for term in query_terms if term in document_terms][:5],
+                "semanticTerms": terms.get(movie_id, [])[:5] if movie_id in scores else [],
             }
         )
-    return {
-        "recommendations": sorted(reranked, key=lambda recommendation: -recommendation["score"]),
-        "retrievalMode": "local",
-        "embeddingMode": "local",
-        "embeddingModel": LOCAL_MODEL,
-        "dimensions": DIMENSIONS,
-    }
+    return sorted(reranked, key=lambda recommendation: -recommendation["score"])

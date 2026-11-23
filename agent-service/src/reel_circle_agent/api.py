@@ -6,10 +6,13 @@ then traces every node of every turn.
 
 import json
 import math
+import ssl
 import time
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Request
+import certifi
+import httpx
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .graph import TurnInput, recommendation_agent
@@ -18,6 +21,14 @@ app = FastAPI(title="Reel Circle recommendation agent")
 
 _BAD_MESSAGE = {"error": "A message of 1-1000 characters is required"}
 _DEFAULT_LIMIT = 5
+_OUTBOUND_TIMEOUT = httpx.Timeout(10.0)
+# Building an SSL context loads the CA bundle (~100 ms); build it once, not on every turn.
+_OUTBOUND_SSL = ssl.create_default_context(cafile=certifi.where())
+
+
+def outbound_transport() -> httpx.AsyncBaseTransport | None:
+    """Transport for calls to the embedding provider and Qdrant; tests override it with fakes."""
+    return None
 
 
 def _utf16_length(text: str) -> int:
@@ -59,7 +70,9 @@ async def agent_method_not_allowed() -> JSONResponse:
 
 
 @app.post("/agent")
-async def agent_turn(request: Request) -> JSONResponse:
+async def agent_turn(
+    request: Request, transport: Annotated[httpx.AsyncBaseTransport | None, Depends(outbound_transport)]
+) -> JSONResponse:
     try:
         body = json.loads(await request.body())
     except ValueError:
@@ -67,5 +80,6 @@ async def agent_turn(request: Request) -> JSONResponse:
     turn = parse_turn(body)
     if turn is None:
         return JSONResponse(_BAD_MESSAGE, status_code=400)
-    result = await recommendation_agent.ainvoke(turn)
+    async with httpx.AsyncClient(transport=transport, timeout=_OUTBOUND_TIMEOUT, verify=_OUTBOUND_SSL) as client:
+        result = await recommendation_agent.ainvoke(turn, config={"configurable": {"http_client": client}})
     return JSONResponse(result["response"], headers={"Cache-Control": "no-store"})

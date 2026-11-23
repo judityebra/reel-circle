@@ -5,7 +5,9 @@ description = "Reel Circle recommendation agent: a LangGraph service behind /api
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "certifi>=2024.2.2",
     "fastapi>=0.115",
+    "httpx>=0.28.1",
     "langgraph>=0.2",
     "langsmith>=0.4",
     "pydantic>=2.8",
