@@ -40,6 +40,8 @@ When nothing in the candidate pool meets every hard constraint, the Python servi
 
 The browser answers on the same `conversationId` with `"decision": "accept"` or `"decision": "reject"` and `"answering"`: the proposal it is answering, exactly as received. Accept loosens the constraint and filters again; reject keeps it and offers the next one. Runtime is offered 15 minutes at a time until the limit covers the longest movie in the candidate pool. After the last rejection the response carries `"nothingFits": { "tightestConstraint": "yearRange" }` instead of a pause (the tightest constraint is the one that alone lets the fewest movies through). A turn without a decision, or with a decision for a proposal that is no longer pending, ends any pause and runs as a normal turn. A turn stops after 12 graph steps and ends its trace with a `step_limit` step. If the Python service is down, the TypeScript fallback applies an accepted proposal itself, so the decision is not lost.
 
+When a chat model interprets a turn but finds nothing usable in it (no hard constraint or preference) and suggests a question, the response pauses with `"pause": { "type": "clarifying_question", "question": "..." }` and no recommendations. The user's reply is an ordinary new turn on the same `conversationId`, which ends the pause, so a turn asks at most once. Rule-based extraction never asks.
+
 ## Response
 
 ```json

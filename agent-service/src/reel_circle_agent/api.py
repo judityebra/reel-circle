@@ -120,8 +120,11 @@ def parse_decision(body: Any) -> tuple[RelaxationDecision, dict[str, Any]] | Non
 
 
 def _answers(pending: dict[str, Any], answering: dict[str, Any]) -> bool:
-    """Whether a decision is about the proposal the conversation is actually waiting on."""
-    return all(pending.get(key) == answering.get(key) for key in ("constraint", "from", "to"))
+    """Whether a decision is about the relaxation the conversation is actually waiting on. A clarifying
+    question is never resumed: its reply is a new turn."""
+    return pending.get("type") == "relaxation" and all(
+        pending.get(key) == answering.get(key) for key in ("constraint", "from", "to")
+    )
 
 
 def parse_turn(body: Any) -> TurnInput | None:

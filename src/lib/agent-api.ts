@@ -21,11 +21,22 @@ export type RelaxationPause = {
   }
 }[RelaxableConstraint]
 
+/** The agent paused: a model found nothing usable in the turn, so it asks. The reply is a new turn. */
+export type ClarifyingPause = { type: 'clarifying_question'; question: string }
+
+export type AgentPause = RelaxationPause | ClarifyingPause
+
 export type RelaxationDecision = 'accept' | 'reject'
 
 export const isRelaxationDecision = (value: unknown): value is RelaxationDecision => value === 'accept' || value === 'reject'
 
 const relaxableConstraints: readonly string[] = ['yearRange', 'languages', 'genres', 'maxRuntime', 'platforms']
+
+const isClarifyingPause = (value: unknown): value is ClarifyingPause => !!value && typeof value === 'object'
+  && (value as Record<string, unknown>).type === 'clarifying_question' && typeof (value as Record<string, unknown>).question === 'string'
+
+/** Whether a value is a pause the browser can render: a relaxation proposal or a clarifying question. */
+const isAgentPause = (value: unknown): value is AgentPause => isRelaxationPause(value) || isClarifyingPause(value)
 
 /** Whether a value is a relaxation proposal the browser can render and answer. */
 export const isRelaxationPause = (value: unknown): value is RelaxationPause => {
@@ -63,8 +74,8 @@ export interface AgentApiResponse {
     semanticTerms: string[]
   }>
   clarificationQuestion?: string
-  /** Present while the agent waits for the user to accept or reject a relaxation. */
-  pause?: RelaxationPause
+  /** Present while the agent waits: for an accept or reject of a relaxation, or for the answer to a question. */
+  pause?: AgentPause
   /** Present when every relaxation was rejected: the constraint that let the fewest movies through. */
   nothingFits?: { tightestConstraint: RelaxableConstraint | 'excludedGenres' | null }
   meta: {
@@ -132,7 +143,7 @@ export async function requestAgentTurn(
   if (!response.ok) throw new Error(`Agent service unavailable (${response.status})`)
   const payload = await response.json() as AgentApiResponse
   if (!payload?.preferences || !Array.isArray(payload.recommendations) || !Array.isArray(payload.meta?.trace)
-    || (payload.pause !== undefined && !isRelaxationPause(payload.pause))) {
+    || (payload.pause !== undefined && !isAgentPause(payload.pause))) {
     throw new Error('Agent service returned invalid data')
   }
   return payload

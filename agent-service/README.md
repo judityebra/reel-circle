@@ -12,8 +12,9 @@ extract -> filter -> semantic -> rank -> validate
 
 Today the graph is linear: preference extraction (a chat model, or rules), the six hard
 constraints, group scoring, semantic retrieval, and a validate guardrail that drops any movie
-breaking a hard constraint. Conversations are remembered per `conversationId`. Pauses arrive in
-later tickets (see issue #2).
+breaking a hard constraint. Conversations are remembered per `conversationId`, and the agent can
+pause: to propose loosening a hard constraint when nothing fits, or to ask a clarifying question
+when a model found nothing usable in the turn (see docs/AGENT_API.md).
 
 ## Model extraction
 

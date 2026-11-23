@@ -164,4 +164,15 @@ describe('agent API', () => {
     })
     await expect(requestAgentTurn('/api', 'Anything', createConversationPreferences(), candidates, [], { fetcher })).rejects.toThrow('invalid data')
   })
+
+  it('accepts a clarifying question pause', async () => {
+    const pause = { type: 'clarifying_question', question: 'Light or serious?' }
+    const fetcher = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ preferences: createConversationPreferences(), recommendations: [], pause, meta: { extractionMode: 'model', durationMs: 1, trace: [] } }),
+    })
+    const result = await requestAgentTurn('/api', 'hmm', createConversationPreferences(), candidates, [], { fetcher })
+    expect(result.pause).toEqual(pause)
+  })
 })

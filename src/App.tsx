@@ -107,6 +107,7 @@ function App() {
   const t = (key: Parameters<typeof translate>[1]) => translate(locale, key)
   const describePause = (pause: RelaxationPause) => describeRelaxation(pause, locale, (value) => displayValue(locale, value))
   const agentReply = (result: AgentApiResponse) => {
+    if (result.pause?.type === 'clarifying_question') return result.pause.question
     if (result.pause) return describePause(result.pause)
     if (result.nothingFits) return describeNothingFits(result.nothingFits, locale)
     return result.clarificationQuestion ?? (result.recommendations.length
@@ -665,7 +666,7 @@ function App() {
         next = result.preferences
         if (generation === conversationGeneration.current) {
           setConversationId(result.conversationId)
-          setRelaxationPause(result.pause)
+          setRelaxationPause(result.pause?.type === 'relaxation' ? result.pause : undefined)
         }
         setLatestAgentMeta(result.meta)
         selectedMovieId = result.recommendations[0]?.movie.id

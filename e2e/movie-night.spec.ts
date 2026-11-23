@@ -166,6 +166,27 @@ test('says nothing fits once every relaxation is rejected', async ({ page }) => 
   await expect(page.locator('.conversation-message.agent').last()).toContainText('The tightest one is the maximum runtime.')
 })
 
+test('shows a clarifying question and sends the reply as an ordinary turn', async ({ page }) => {
+  const preferences = { genres: [], excludedGenres: [], platforms: [], moods: [], lastUpdatedAt: Date.now() }
+  const sent: Array<{ message?: string; decision?: string }> = []
+  const question = 'Do you want something light or something serious tonight?'
+  await answerAgentTurns(page, (request) => {
+    sent.push(request)
+    return sent.length === 1
+      ? { preferences, recommendations: [], clarificationQuestion: question, pause: { type: 'clarifying_question', question }, meta: { ...deterministicMeta, extractionMode: 'model', trace: [] } }
+      : { preferences: { ...preferences, genres: ['Comedy'] }, recommendations: [], meta: { ...deterministicMeta, trace: completedTrace(fullTurn) } }
+  })
+
+  await askAgent(page, 'hmm, not sure')
+  await expect(page.locator('.conversation-message.agent').last()).toContainText(question)
+  await expect(page.locator('.relaxation-proposal')).toBeHidden()
+
+  await askAgent(page, 'Something light')
+  await expect.poll(() => sent.length).toBe(2)
+  expect(sent[1]).toMatchObject({ message: 'Something light' })
+  expect(sent[1].decision).toBeUndefined()
+})
+
 test('publishes Reel Circle social preview metadata', async ({ page }) => {
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/favicon.svg')
   await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', 'Reel Circle — Find tonight\'s film')

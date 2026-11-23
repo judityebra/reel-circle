@@ -2,6 +2,8 @@
 
     extract_preferences -> filter_candidates -> semantic_retrieval -> rank_candidates
         -> validate_results -> respond
+    extract_preferences --model found nothing usable--> ask_clarifying_question --pause-->
+        (the user's reply arrives as a new turn)
     filter_candidates --nothing fits--> propose_relaxation --pause--> (user decides)
         accept: loosen one hard constraint -> filter_candidates
         reject: keep it -> filter_candidates -> next proposal, or "nothing fits"
@@ -74,6 +76,7 @@ class TurnState(TypedDict, total=False):
     rejected_relaxations: list[str]
     # Per run only.
     clarifying_question: Annotated[str | None, UntrackedValue]
+    needs_clarification: Annotated[bool, UntrackedValue]
     ranked: Annotated[list[Recommendation], UntrackedValue]
     candidates_meeting_constraints: Annotated[int, UntrackedValue]
     semantic: Annotated[dict[str, Any], UntrackedValue]
@@ -124,6 +127,15 @@ def _next_relaxation(state: TurnState, config: RunnableConfig) -> Proposal | Non
     return next_relaxation(state["preferences"], rejected, _turn(config)["candidate_pool"])
 
 
+CHOOSING_FIELDS = ("genres", "excludedGenres", "platforms", "moods", "maxRuntime", "yearRange", "languages")
+
+
+def _adds_something_to_choose_by(before: Preferences, after: Preferences) -> bool:
+    """Whether the turn changed a hard constraint or a mood. Group size and occasion are remembered
+    but don't change which movies fit, so a turn with only those still gets a clarifying question."""
+    return any(before.get(field) != after.get(field) for field in CHOOSING_FIELDS)
+
+
 def _new_turn(now: int) -> dict[str, Any]:
     """Turn metadata that every new message resets, which also ends any pending pause."""
     return {"last_turn_at": now, "rejected_relaxations": []}
@@ -139,10 +151,13 @@ async def extract_preferences(state: TurnState, config: RunnableConfig) -> NodeR
         settings.get("chat_model"), turn["message"], current, settings.get("model_retry", DEFAULT_RETRY_POLICY)
     )
     if outcome.extracted is not None:
+        question = outcome.extracted["clarificationQuestion"]
+        merged = merge_model_extraction(current, outcome.extracted, now)
         update = {
-            "preferences": merge_model_extraction(current, outcome.extracted, now),
+            "preferences": merged,
             "extraction": {"mode": "model", "status": outcome.status},
-            "clarifying_question": outcome.extracted["clarificationQuestion"],
+            "clarifying_question": question,
+            "needs_clarification": bool(question) and not _adds_something_to_choose_by(current, merged),
         }
         return {**update, **_new_turn(now)}, "completed", "model structured extraction"
     update = {
@@ -150,6 +165,17 @@ async def extract_preferences(state: TurnState, config: RunnableConfig) -> NodeR
         "extraction": {"mode": "deterministic", "status": outcome.status, "error": outcome.error},
     }
     return {**update, **_new_turn(now)}, "completed", "deterministic structured extraction"
+
+
+def ask_clarifying_question(state: TurnState) -> dict[str, Any]:
+    """Pauses with the model's question. The reply comes back as a new turn (the API never resumes
+    this pause), which ends it; so a turn asks at most once, and only when a model interpreted it."""
+    interrupt({"type": "clarifying_question", "question": state["clarifying_question"]})
+    return {}
+
+
+def route_after_extract(state: TurnState, config: RunnableConfig) -> str:
+    return "ask_clarifying_question" if state.get("needs_clarification") else "filter_candidates"
 
 
 async def filter_candidates(state: TurnState, config: RunnableConfig) -> NodeResult:
@@ -269,7 +295,7 @@ def respond(state: TurnState, config: RunnableConfig) -> dict[str, Any]:
 
 
 def turn_response(result: dict[str, Any], turn: TurnInput) -> dict[str, Any]:
-    """The browser's response for a run that finished, or one that paused on a relaxation."""
+    """The browser's response for a run that finished, or one that paused (relaxation or question)."""
     interrupts = result.get("__interrupt__")
     return assemble_response(result, turn, pause=interrupts[0].value) if interrupts else result["response"]
 
@@ -293,9 +319,13 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
         validate_results,
     ]:
         graph.add_node(step.__name__, _traced(step))
+    graph.add_node("ask_clarifying_question", ask_clarifying_question)
     graph.add_node("respond", respond)
     graph.add_edge(START, "extract_preferences")
-    graph.add_edge("extract_preferences", "filter_candidates")
+    graph.add_conditional_edges(
+        "extract_preferences", route_after_extract, ["ask_clarifying_question", "filter_candidates"]
+    )
+    graph.add_edge("ask_clarifying_question", END)
     graph.add_conditional_edges("filter_candidates", route_after_filter, ["propose_relaxation", "semantic_retrieval"])
     graph.add_edge("propose_relaxation", "filter_candidates")
     graph.add_edge("semantic_retrieval", "rank_candidates")
