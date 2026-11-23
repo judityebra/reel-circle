@@ -16,5 +16,8 @@ export default defineConfig({
     command: 'npm run dev -- --host 127.0.0.1 --port 4173',
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,
+    // The e2e tests mock /api/agent; the app only calls it when an API URL is configured, which
+    // .env.local provides locally but CI does not have.
+    env: { VITE_MOVIE_API_URL: '/api' },
   },
 })

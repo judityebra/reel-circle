@@ -58,7 +58,7 @@ test('keeps the compact header on one row', async ({ page }) => {
 
   await expect(page.locator('.privacy-note')).toBeHidden()
   await expect(page.locator('.topbar')).toHaveCSS('height', '64px')
-  await expect(page.getByRole('button', { name: 'Open AI lab' })).toHaveCSS('width', '34px')
+  await expect(page.getByRole('button', { name: 'How AI picked' })).toHaveCSS('width', '34px')
 })
 
 test('keeps earlier preferences during conversational refinement', async ({ page }) => {
