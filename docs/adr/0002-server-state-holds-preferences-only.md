@@ -1,3 +1,5 @@
 # Server-side conversation state holds preferences only
 
 The LangGraph checkpointer keeps one thread per conversation and stores only the typed preferences, any pending interrupt (a clarifying question or a proposed relaxation) and turn metadata, expiring after 30 days. Message text is used during the turn and dropped; persons, ratings and the candidate pool are never stored, because the browser resends the pool on every turn with watched movies already removed. Delete data also deletes the server thread, and room links never carry the thread id. This keeps the privacy-first promise while still giving the graph durable memory across turns and restarts.
+
+The one exception is the optional Qdrant vector store: to search candidate-scoped, each turn upserts the candidate pool's movie ids and embedding vectors into a shared collection. These describe catalog movies only, never persons, ratings or messages, and the collection accumulates movies across every group, so it cannot reveal which movies a particular group has watched.

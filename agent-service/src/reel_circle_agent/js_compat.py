@@ -5,9 +5,11 @@ fixtures/agent-parity.json), and a few JavaScript built-ins differ from their Py
 """
 
 import math
+import re
 import unicodedata
 from collections.abc import Iterable
 from decimal import ROUND_HALF_UP, Decimal
+from urllib.parse import quote
 
 
 def js_round(value: float) -> int:
@@ -51,3 +53,46 @@ def strip_accents_lower(value: str) -> str:
 def unique(values: Iterable[str]) -> list[str]:
     """`[...new Set(values)]`: de-duplicates while keeping first-seen order."""
     return list(dict.fromkeys(values))
+
+
+_JS_DECIMAL = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
+_JS_RADIX = {"0x": 16, "0o": 8, "0b": 2}
+
+
+def js_number(value: object) -> float:
+    """`Number(value)` for strings, numbers and missing values: hex, `Infinity`, blank as 0, otherwise NaN."""
+    if value is None:
+        return math.nan
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, int | float):
+        return float(value)
+    if not isinstance(value, str):
+        return math.nan
+    text = value.strip()
+    if not text:
+        return 0.0
+    if text in ("Infinity", "+Infinity", "-Infinity"):
+        return -math.inf if text.startswith("-") else math.inf
+    radix = _JS_RADIX.get(text[:2].lower())
+    if radix:
+        try:
+            return float(int(text[2:], radix))
+        except ValueError:
+            return math.nan
+    return float(text) if _JS_DECIMAL.fullmatch(text) else math.nan
+
+
+def js_number_value(value: float) -> int | float:
+    """A number as JSON.stringify writes it: integral values without a trailing `.0`."""
+    return int(value) if math.isfinite(value) and value.is_integer() else value
+
+
+def encode_uri_component(value: str) -> str:
+    """`encodeURIComponent`: leaves `A-Z a-z 0-9 - _ . ! ~ * ' ( )` unescaped."""
+    return quote(value, safe="-_.!~*'()")
+
+
+def strip_one_trailing_slash(value: str) -> str:
+    r"""`value.replace(/\/$/, '')`: removes at most one trailing slash."""
+    return value[:-1] if value.endswith("/") else value

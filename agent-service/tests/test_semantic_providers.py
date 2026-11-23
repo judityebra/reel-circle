@@ -232,3 +232,81 @@ def test_a_failing_qdrant_falls_back_to_in_memory_search_and_says_why(services, 
         "fallbackReason": "qdrant-failed",
     }
     assert body["recommendations"][0]["movie"]["id"] == "paris"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [[1, 2, 3], {"data": [None, None, None]}, {"data": "nope"}],
+    ids=["list-body", "non-dict-items", "data-not-a-list"],
+)
+def test_any_malformed_provider_answer_falls_back_to_local_vectors(services, monkeypatch, body):
+    _openai_provider(monkeypatch)
+    services(FakeServices(embedding_body=body))
+    meta = _turn()["meta"]["semantic"]
+    assert (meta["retrievalMode"], meta["fallbackReason"]) == ("local", "embedding-failed")
+
+
+def test_any_unexpected_qdrant_error_falls_back_to_in_memory_search(services, monkeypatch):
+    _openai_provider(monkeypatch)
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.test")
+    hits = {"result": {"points": [{"score": {"nested": True}, "payload": {"movieId": "paris"}}]}}
+    services(FakeServices(qdrant={"POST query": (200, hits)}))
+    meta = _turn()["meta"]["semantic"]
+    assert (meta["retrievalMode"], meta["fallbackReason"]) == ("embedding-memory", "qdrant-failed")
+
+
+def test_qdrant_scores_sent_as_numeric_strings_count_like_numbers(services, monkeypatch):
+    _openai_provider(monkeypatch)
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.test")
+    hits = {"result": {"points": [{"score": "0.9", "payload": {"movieId": "paris"}}]}}
+    services(FakeServices(qdrant={"POST query": (200, hits)}))
+    body = _turn()
+    assert body["meta"]["semantic"]["retrievalMode"] == "qdrant"
+    assert body["recommendations"][0]["semanticScore"] == 90
+
+
+def test_qdrant_with_no_hits_keeps_qdrant_mode_and_scores_every_movie_zero(services, monkeypatch):
+    _openai_provider(monkeypatch)
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.test")
+    services(FakeServices(qdrant={"POST query": (200, {"result": {"points": []}})}))
+    body = _turn()
+    assert body["meta"]["semantic"]["retrievalMode"] == "qdrant"
+    assert [item["semanticScore"] for item in body["recommendations"]] == [0, 0]
+    assert all(item["semanticTerms"] == [] for item in body["recommendations"])
+
+
+def test_local_vectors_still_go_to_qdrant_when_it_is_configured(services, monkeypatch):
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.test")
+    fake = services(FakeServices(qdrant={"POST query": (200, QDRANT_HITS)}))
+    body = _turn()
+    assert body["meta"]["semantic"] == {
+        "retrievalMode": "qdrant",
+        "embeddingMode": "local",
+        "embeddingModel": "local-hash-v1",
+        "dimensions": 384,
+    }
+    assert fake.requests[0].url.path == "/collections/reel-circle-384"
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [("300.5", 300.5), ("0x100", 256), ("Infinity", 3072), ("0", 768), ("lots", 768), ("  512  ", 512)],
+)
+def test_gemini_dimensions_are_read_like_javascript_number(services, monkeypatch, configured, expected):
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "gemini")
+    monkeypatch.setenv("EMBEDDING_MODEL", "gemini-embedding-2")
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", configured)
+    fake = services(FakeServices())
+    _turn()
+    sent = json.loads(fake.requests[0].content)["requests"][0]["embedContentConfig"]["outputDimensionality"]
+    assert sent == expected
+
+
+def test_qdrant_collection_names_are_escaped_like_encode_uri_component(services, monkeypatch):
+    _openai_provider(monkeypatch)
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.test/")
+    monkeypatch.setenv("QDRANT_COLLECTION", "movies (v2)!")
+    fake = services(FakeServices(qdrant={"POST query": (200, QDRANT_HITS)}))
+    _turn()
+    qdrant = next(request for request in fake.requests if request.url.host == "qdrant.test")
+    assert qdrant.url.raw_path.decode() == "/collections/movies%20(v2)!"

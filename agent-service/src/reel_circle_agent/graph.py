@@ -14,7 +14,6 @@ ADR 0002: `message`, `persons` and `candidate_pool` are per-turn input. When a c
 added, they must stay out of the persisted state.
 """
 
-import inspect
 import operator
 import time
 from collections.abc import Awaitable, Callable
@@ -67,14 +66,15 @@ def _status(did_work: bool) -> StepStatus:
     return "completed" if did_work else "skipped"
 
 
-def _traced(node: Callable[..., NodeResult | Awaitable[NodeResult]]) -> Callable[..., Awaitable[dict[str, Any]]]:
-    """Runs a node (sync or async, with or without the run config) and records it as one trace step named after it."""
-    wants_config = len(inspect.signature(node).parameters) == 2
+TracedNode = Callable[[TurnState, RunnableConfig], Awaitable[NodeResult]]
+
+
+def _traced(node: TracedNode) -> Callable[[TurnState, RunnableConfig], Awaitable[dict[str, Any]]]:
+    """Runs a node and records it as one trace step named after it."""
 
     async def run(state: TurnState, config: RunnableConfig) -> dict[str, Any]:
         started = time.perf_counter()
-        outcome = node(state, config) if wants_config else node(state)
-        update, status, observation = await outcome if inspect.isawaitable(outcome) else outcome
+        update, status, observation = await node(state, config)
         duration = round((time.perf_counter() - started) * 1000)
         step: TraceStep = {"tool": node.__name__, "status": status, "durationMs": duration, "observation": observation}
         return {**update, "trace": [step]}
@@ -83,14 +83,14 @@ def _traced(node: Callable[..., NodeResult | Awaitable[NodeResult]]) -> Callable
     return run
 
 
-def extract_preferences(state: TurnState) -> NodeResult:
+async def extract_preferences(state: TurnState, config: RunnableConfig) -> NodeResult:
     now = int(time.time() * 1000)
     current = state.get("incoming_preferences") or create_conversation_preferences(now)
     preferences = update_conversation_preferences(current, state["message"], now)
     return {"preferences": preferences}, "completed", "deterministic structured extraction"
 
 
-def filter_candidates(state: TurnState) -> NodeResult:
+async def filter_candidates(state: TurnState, config: RunnableConfig) -> NodeResult:
     pool = state["candidate_pool"]
     ranked = score_candidates(pool, state["persons"], state["preferences"])
     update = {"ranked": ranked, "candidates_meeting_constraints": len(ranked)}
@@ -119,12 +119,12 @@ def _shortlist_entry(recommendation: Recommendation, preferences: Preferences) -
     }
 
 
-def rank_candidates(state: TurnState) -> NodeResult:
+async def rank_candidates(state: TurnState, config: RunnableConfig) -> NodeResult:
     shortlist = [_shortlist_entry(item, state["preferences"]) for item in state["ranked"][: state["limit"]]]
     return {"recommendations": shortlist}, _status(bool(shortlist)), f"{len(shortlist)} recommendations returned"
 
 
-def validate_results(state: TurnState) -> NodeResult:
+async def validate_results(state: TurnState, config: RunnableConfig) -> NodeResult:
     """Guardrail: drops any recommendation that breaks a hard constraint instead of re-ranking.
 
     Filtering runs before ranking, so a violation can only come from a bug; it is reported in the

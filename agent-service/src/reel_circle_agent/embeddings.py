@@ -13,11 +13,13 @@ import math
 import os
 from dataclasses import dataclass
 from typing import Literal
-from urllib.parse import quote
 
 import httpx
 
+from .js_compat import encode_uri_component, js_number, js_number_value, strip_one_trailing_slash
 from .semantic import DIMENSIONS, LOCAL_MODEL, semantic_vector
+
+EmbeddingMode = Literal["provider", "local"]
 
 
 class EmbeddingError(Exception):
@@ -27,17 +29,16 @@ class EmbeddingError(Exception):
 @dataclass(frozen=True)
 class EmbeddingBatch:
     vectors: list[list[float]]
-    mode: Literal["provider", "local"]
+    mode: EmbeddingMode
     model: str
     dimensions: int
 
 
-def _gemini_dimensions() -> int:
-    try:
-        configured = float(os.environ.get("EMBEDDING_DIMENSIONS", ""))
-    except ValueError:
-        configured = 0
-    return max(128, min(3072, int(configured) if math.isfinite(configured) and configured else 768))
+def _gemini_dimensions() -> int | float:
+    """`Math.max(128, Math.min(3072, Number(EMBEDDING_DIMENSIONS) || 768))`."""
+    configured = js_number(os.environ.get("EMBEDDING_DIMENSIONS"))
+    wanted = configured if configured and not math.isnan(configured) else 768
+    return js_number_value(max(128, min(3072, wanted)))
 
 
 def _is_vector(value: object) -> bool:
@@ -51,7 +52,7 @@ def _is_vector(value: object) -> bool:
 async def embed_texts(texts: list[str], client: httpx.AsyncClient) -> EmbeddingBatch:
     """Embeds the query (first) and the movie documents, with the configured provider or local vectors."""
     provider = os.environ.get("EMBEDDING_PROVIDER", "").lower()
-    base_url = os.environ.get("EMBEDDING_BASE_URL", "").rstrip("/")
+    base_url = strip_one_trailing_slash(os.environ.get("EMBEDDING_BASE_URL", ""))
     model = os.environ.get("EMBEDDING_MODEL", "")
     api_key = os.environ.get("EMBEDDING_API_KEY")
     if not model or (provider != "gemini" and not base_url):
@@ -77,7 +78,7 @@ async def embed_texts(texts: list[str], client: httpx.AsyncClient) -> EmbeddingB
                 for index, text in enumerate(texts)
             ]
             response = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{quote(model, safe='')}:batchEmbedContents",
+                f"https://generativelanguage.googleapis.com/v1beta/models/{encode_uri_component(model)}:batchEmbedContents",
                 json={"requests": requests},
                 headers={"x-goog-api-key": api_key} if api_key else {},
             )

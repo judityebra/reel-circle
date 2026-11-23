@@ -2,8 +2,8 @@
 
 Without an embedding provider, the query and each movie become 384-dimension hashed bag-of-words
 vectors. Semantic similarity is worth a bounded 28% of the final score, so vibe phrases can reorder
-movies that meet the hard constraints but never bring back one that doesn't. Embedding providers
-and Qdrant arrive in a later ticket.
+movies that meet the hard constraints but never bring back one that doesn't. Provider embeddings
+and Qdrant (retrieval.py) feed the same rerank.
 """
 
 import math
