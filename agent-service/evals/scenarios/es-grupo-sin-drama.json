@@ -1,0 +1,49 @@
+{
+  "id": "es-grupo-sin-drama",
+  "lang": "es",
+  "tags": [
+    "exclusions",
+    "genres",
+    "multi-turn"
+  ],
+  "turns": [
+    {
+      "message": "Somos 4 personas",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        }
+      }
+    },
+    {
+      "message": "Sin drama, queremos fantasía",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "excludes": [
+          "Drama"
+        ],
+        "preferences": {
+          "genres": [
+            "Fantasy"
+          ]
+        }
+      }
+    }
+  ]
+}

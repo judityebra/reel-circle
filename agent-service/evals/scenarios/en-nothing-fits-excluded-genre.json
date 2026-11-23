@@ -2,9 +2,9 @@
   "id": "en-nothing-fits-excluded-genre",
   "lang": "en",
   "tags": [
-    "single-turn",
+    "exclusions",
     "nothing-fits",
-    "exclusions"
+    "single-turn"
   ],
   "candidatePool": [
     {

@@ -1,0 +1,43 @@
+{
+  "id": "es-exclusion-se-mantiene",
+  "lang": "es",
+  "tags": [
+    "exclusions",
+    "genres",
+    "multi-turn",
+    "platforms"
+  ],
+  "turns": [
+    {
+      "message": "Nada de terror",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "excludes": [
+          "Horror"
+        ]
+      }
+    },
+    {
+      "message": "Ahora algo de ciencia ficción en Filmin",
+      "expect": {
+        "preferences": {
+          "genres": [
+            "Sci-Fi"
+          ],
+          "platforms": [
+            "Filmin"
+          ]
+        }
+      }
+    }
+  ]
+}

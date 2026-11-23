@@ -1,0 +1,34 @@
+{
+  "id": "en-scifi-netflix",
+  "lang": "en",
+  "tags": [
+    "genres",
+    "platforms",
+    "single-turn"
+  ],
+  "turns": [
+    {
+      "message": "Sci-fi on Netflix",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Sci-Fi"
+          ],
+          "platforms": [
+            "Netflix"
+          ]
+        }
+      }
+    }
+  ]
+}

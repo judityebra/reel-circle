@@ -2,6 +2,7 @@
   "id": "en-relaxation-accepted",
   "lang": "en",
   "tags": [
+    "languages",
     "multi-turn",
     "relaxation",
     "year-range"
@@ -35,6 +36,20 @@
         "Filmin"
       ],
       "rating": 3.8,
+      "language": "English"
+    },
+    {
+      "id": "hereditary",
+      "title": "Hereditary",
+      "year": 2018,
+      "runtime": 127,
+      "genres": [
+        "Horror"
+      ],
+      "platforms": [
+        "Filmin"
+      ],
+      "rating": 4.0,
       "language": "English"
     }
   ],

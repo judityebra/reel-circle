@@ -1,0 +1,67 @@
+{
+  "id": "es-pregunta-aclaratoria",
+  "lang": "es",
+  "tags": [
+    "clarifying-question",
+    "multi-turn"
+  ],
+  "model": [
+    {
+      "genres": [],
+      "excludedGenres": [],
+      "platforms": [],
+      "moods": [],
+      "maxRuntime": null,
+      "yearRange": null,
+      "languages": [],
+      "peopleCount": null,
+      "viewingContext": null,
+      "clarificationQuestion": "¿Algo ligero o algo intenso?"
+    },
+    {
+      "genres": [
+        "Horror"
+      ],
+      "excludedGenres": [],
+      "platforms": [],
+      "moods": [],
+      "maxRuntime": null,
+      "yearRange": null,
+      "languages": [],
+      "peopleCount": null,
+      "viewingContext": null,
+      "clarificationQuestion": null
+    }
+  ],
+  "turns": [
+    {
+      "message": "no sé, algo",
+      "expect": {
+        "path": [
+          "extract_preferences"
+        ],
+        "pause": "clarifying_question"
+      }
+    },
+    {
+      "message": "Algo de miedo",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Horror"
+          ]
+        }
+      }
+    }
+  ]
+}

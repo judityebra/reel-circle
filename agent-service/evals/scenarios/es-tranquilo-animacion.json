@@ -1,0 +1,34 @@
+{
+  "id": "es-tranquilo-animacion",
+  "lang": "es",
+  "tags": [
+    "genres",
+    "moods",
+    "single-turn"
+  ],
+  "turns": [
+    {
+      "message": "Algo tranquilo y acogedor de animación",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Animation"
+          ],
+          "moods": [
+            "Gentle"
+          ]
+        }
+      }
+    }
+  ]
+}

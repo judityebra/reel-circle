@@ -1,0 +1,67 @@
+{
+  "id": "en-clarifying-question-answered",
+  "lang": "en",
+  "tags": [
+    "clarifying-question",
+    "multi-turn"
+  ],
+  "model": [
+    {
+      "genres": [],
+      "excludedGenres": [],
+      "platforms": [],
+      "moods": [],
+      "maxRuntime": null,
+      "yearRange": null,
+      "languages": [],
+      "peopleCount": null,
+      "viewingContext": null,
+      "clarificationQuestion": "Something light, or something serious?"
+    },
+    {
+      "genres": [
+        "Comedy"
+      ],
+      "excludedGenres": [],
+      "platforms": [],
+      "moods": [],
+      "maxRuntime": null,
+      "yearRange": null,
+      "languages": [],
+      "peopleCount": null,
+      "viewingContext": null,
+      "clarificationQuestion": null
+    }
+  ],
+  "turns": [
+    {
+      "message": "hmm, not sure what I want",
+      "expect": {
+        "path": [
+          "extract_preferences"
+        ],
+        "pause": "clarifying_question"
+      }
+    },
+    {
+      "message": "Something light and funny",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ]
+        }
+      }
+    }
+  ]
+}

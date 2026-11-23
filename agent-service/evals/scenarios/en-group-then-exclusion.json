@@ -1,0 +1,48 @@
+{
+  "id": "en-group-then-exclusion",
+  "lang": "en",
+  "tags": [
+    "exclusions",
+    "known-issue",
+    "multi-turn"
+  ],
+  "knownIssue": "#33",
+  "knownFailure": [
+    "lost exclusions: Horror"
+  ],
+  "turns": [
+    {
+      "message": "Movie night for 4 people",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        }
+      }
+    },
+    {
+      "message": "And nobody likes horror",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "excludes": [
+          "Horror"
+        ]
+      }
+    }
+  ]
+}

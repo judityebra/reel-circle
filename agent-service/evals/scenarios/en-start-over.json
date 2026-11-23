@@ -1,0 +1,49 @@
+{
+  "id": "en-start-over",
+  "lang": "en",
+  "tags": [
+    "genres",
+    "multi-turn",
+    "platforms",
+    "start-over"
+  ],
+  "turns": [
+    {
+      "message": "A sci-fi movie on Netflix",
+      "expect": {
+        "preferences": {
+          "genres": [
+            "Sci-Fi"
+          ],
+          "platforms": [
+            "Netflix"
+          ]
+        }
+      }
+    },
+    {
+      "message": "Forget that, start over. A romance on MUBI",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "startsOver": true,
+        "preferences": {
+          "genres": [
+            "Romance"
+          ],
+          "platforms": [
+            "MUBI"
+          ]
+        }
+      }
+    }
+  ]
+}

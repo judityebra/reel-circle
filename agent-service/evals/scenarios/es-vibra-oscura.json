@@ -1,0 +1,45 @@
+{
+  "id": "es-vibra-oscura",
+  "lang": "es",
+  "tags": [
+    "moods",
+    "multi-turn",
+    "platforms",
+    "vibe"
+  ],
+  "turns": [
+    {
+      "message": "Una historia oscura",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "moods": [
+            "Twisty"
+          ]
+        }
+      }
+    },
+    {
+      "message": "En Netflix",
+      "expect": {
+        "preferences": {
+          "moods": [
+            "Twisty"
+          ],
+          "platforms": [
+            "Netflix"
+          ]
+        }
+      }
+    }
+  ]
+}

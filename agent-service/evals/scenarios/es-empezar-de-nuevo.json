@@ -2,9 +2,10 @@
   "id": "es-empezar-de-nuevo",
   "lang": "es",
   "tags": [
+    "genres",
+    "languages",
     "multi-turn",
-    "start-over",
-    "languages"
+    "start-over"
   ],
   "turns": [
     {
@@ -30,6 +31,7 @@
           "rank_candidates",
           "validate_results"
         ],
+        "startsOver": true,
         "preferences": {
           "genres": [
             "Drama"

@@ -1,0 +1,92 @@
+{
+  "id": "es-relajacion-rechazada",
+  "lang": "es",
+  "tags": [
+    "genres",
+    "languages",
+    "multi-turn",
+    "relaxation"
+  ],
+  "candidatePool": [
+    {
+      "id": "memories",
+      "title": "Memories of Murder",
+      "year": 2003,
+      "runtime": 131,
+      "genres": [
+        "Thriller",
+        "Crime"
+      ],
+      "platforms": [
+        "Netflix"
+      ],
+      "rating": 4.3,
+      "language": "Korean"
+    },
+    {
+      "id": "clue",
+      "title": "Clue",
+      "year": 1985,
+      "runtime": 94,
+      "genres": [
+        "Comedy",
+        "Mystery"
+      ],
+      "platforms": [
+        "Filmin"
+      ],
+      "rating": 3.8,
+      "language": "English"
+    },
+    {
+      "id": "hereditary",
+      "title": "Hereditary",
+      "year": 2018,
+      "runtime": 127,
+      "genres": [
+        "Horror"
+      ],
+      "platforms": [
+        "Filmin"
+      ],
+      "rating": 4.0,
+      "language": "English"
+    }
+  ],
+  "turns": [
+    {
+      "message": "Una comedia en coreano",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates"
+        ],
+        "pause": "relaxation"
+      }
+    },
+    {
+      "decision": "reject",
+      "message": "No, que sea coreana",
+      "expect": {
+        "pause": "relaxation"
+      }
+    },
+    {
+      "decision": "accept",
+      "message": "Vale, cualquier género",
+      "expect": {
+        "preferences": {
+          "languages": [
+            "ko"
+          ],
+          "genres": []
+        },
+        "results": {
+          "top": [
+            "memories"
+          ]
+        }
+      }
+    }
+  ]
+}

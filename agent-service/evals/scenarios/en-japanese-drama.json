@@ -1,0 +1,34 @@
+{
+  "id": "en-japanese-drama",
+  "lang": "en",
+  "tags": [
+    "genres",
+    "languages",
+    "single-turn"
+  ],
+  "turns": [
+    {
+      "message": "A Japanese drama",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Drama"
+          ],
+          "languages": [
+            "ja"
+          ]
+        }
+      }
+    }
+  ]
+}

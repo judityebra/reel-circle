@@ -2,8 +2,8 @@
   "id": "es-sin-terror",
   "lang": "es",
   "tags": [
-    "single-turn",
-    "exclusions"
+    "exclusions",
+    "single-turn"
   ],
   "turns": [
     {
@@ -16,12 +16,12 @@
           "rank_candidates",
           "validate_results"
         ],
-        "excludes": [
-          "Horror"
-        ],
         "results": {
           "min": 3
-        }
+        },
+        "excludes": [
+          "Horror"
+        ]
       }
     }
   ]

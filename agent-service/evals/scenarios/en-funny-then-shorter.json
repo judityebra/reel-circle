@@ -1,0 +1,52 @@
+{
+  "id": "en-funny-then-shorter",
+  "lang": "en",
+  "tags": [
+    "genres",
+    "multi-turn",
+    "runtime"
+  ],
+  "turns": [
+    {
+      "message": "Something funny",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ]
+        }
+      }
+    },
+    {
+      "message": "Actually, make it under 100 minutes",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "preferences": {
+          "genres": [
+            "Comedy"
+          ],
+          "maxRuntime": 100
+        }
+      }
+    }
+  ]
+}
