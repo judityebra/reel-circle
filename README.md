@@ -23,8 +23,9 @@ The default experience is a focused decision dashboard. The optional AI lab expo
 - **Conversation memory:** one checkpointed thread per conversation (memory, SQLite or Postgres) that stores typed preferences only; the message, persons and candidate pool never reach storage, and conversations expire after 30 days.
 - **Model extraction:** gpt-4.1-mini by default, Claude or Gemini by configuration, with JSON-schema structured output, bounded retries inside a time budget, and rule-based fallback.
 - **Semantic retrieval:** rich TMDB documents, native Gemini or OpenAI-compatible embeddings, and optional Qdrant search rerank valid candidates for vibe-based requests.
-- **Quality:** 212 TypeScript and 141 Python tests, 9 Playwright flows, parity fixtures shared by both languages, ESLint and ruff, production and Docker builds, dependency auditing, and an extraction-accuracy gate in CI.
+- **Quality:** 212 TypeScript and 179 Python tests, 9 Playwright flows, parity fixtures shared by both languages, ESLint and ruff, production and Docker builds, dependency auditing, and an extraction-accuracy gate in CI.
 - **Evaluation:** a seeded synthetic benchmark comparing every recommender and group strategy with NDCG@10, Precision@10 and Spearman (95% CIs), plus a bilingual preference-extraction eval. See [docs/EVALUATION.md](docs/EVALUATION.md).
+- **Agent evaluation:** a scorecard that replays 61 scripted conversations (24 in Spanish, about half multi-turn) through the Python agent and gates CI. Evaluators check the graph path and the final answer (no hard constraint broken, exclusions kept across turns), and the suite injects failures (embedding, Qdrant and model timeouts, HTTP errors and invalid JSON: 12/12 graceful fallbacks), plants prompt injection in movie text (6/6 attacks resisted), proves ratings and watch history never reach the agent's storage, and sends off-topic and adversarial messages. See [agent-service/README.md](agent-service/README.md#agent-evaluation).
 
 ## Project documentation
 
@@ -137,7 +138,7 @@ Shared room links are asynchronous snapshots, not real-time collaboration. They 
 
 ## Roadmap boundary
 
-The repository implements a Python LangGraph recommendation agent with server-side conversation memory, clarifying-question and relaxation pauses, optional hosted LLM extraction (OpenAI, Claude or Gemini), provider embeddings, Qdrant retrieval and independent fallbacks, plus a TypeScript fallback pipeline, local neural ranking, TMDB tools, evaluation, and observable traces. Still planned: an agent evaluation harness (LangSmith, then Langfuse), deploying the Python service, and incremental background indexing. Credentials stay server-side.
+The repository implements a Python LangGraph recommendation agent with server-side conversation memory, clarifying-question and relaxation pauses, optional hosted LLM extraction (OpenAI, Claude or Gemini), provider embeddings, Qdrant retrieval and independent fallbacks, plus a TypeScript fallback pipeline, local neural ranking, TMDB tools, evaluation, and observable traces. It also has an agent evaluation harness: a CI-gated scorecard with failure-injection and security suites. Still planned: running those evaluators as LangSmith experiments, repeated-run reliability (pass@k, pass^k) with the real model, an LLM judge for grounded explanations, cost and latency reporting, Langfuse, deploying the Python service, and incremental background indexing. Credentials stay server-side.
 
 The Experiment Lab provides local backup and delete-all-data controls. Delete removes profiles, ratings, model outputs, traces, and cached catalog data. TMDB metadata and images require TMDB attribution; the application footer includes the required non-endorsement notice.
 
@@ -151,5 +152,6 @@ npm run build
 
 cd agent-service
 uv run pytest
+uv run reel-eval
 uv run ruff check . && uv run ruff format --check .
 ```

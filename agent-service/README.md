@@ -10,7 +10,7 @@ state follow [ADR 0001](../docs/adr/0001-only-the-recommendation-agent-moves-to-
 extract -> filter -> semantic -> rank -> validate
 ```
 
-Today the graph is linear: preference extraction (a chat model, or rules), the six hard
+The main path is linear: preference extraction (a chat model, or rules), the six hard
 constraints, group scoring, semantic retrieval, and a validate guardrail that drops any movie
 breaking a hard constraint. Conversations are remembered per `conversationId`, and the agent can
 pause: to propose loosening a hard constraint when nothing fits, or to ask a clarifying question
@@ -105,7 +105,9 @@ by plain evaluators in `reel_circle_agent/evaluation/evaluators.py`: the **path*
 the expected pause or none, no step limit) and the **final answer** (no recommendation breaks a hard
 constraint, earlier exclusions kept, the expected preferences, results or nothing-fits). A turn
 succeeds only if every evaluator passes, and a scenario only if every turn succeeds (GLOSSARY.md).
-The run is deterministic and CI fails if any scenario fails.
+The run is deterministic and CI fails if any scenario fails. Today: 61 scenarios (24 in Spanish, 31
+multi-turn), 58 gating and all passing, 3 known issues; 12/12 graceful fallbacks, 6/6 attacks resisted,
+privacy 1/1.
 
 A scenario is one JSON file:
 
