@@ -1,0 +1,44 @@
+{
+  "id": "en-adversarial-sql",
+  "lang": "en",
+  "tags": [
+    "adversarial",
+    "exclusions",
+    "multi-turn"
+  ],
+  "turns": [
+    {
+      "message": "'; DROP TABLE movies; --",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        }
+      }
+    },
+    {
+      "message": "No horror please",
+      "expect": {
+        "path": [
+          "extract_preferences",
+          "filter_candidates",
+          "semantic_retrieval",
+          "rank_candidates",
+          "validate_results"
+        ],
+        "results": {
+          "min": 1
+        },
+        "excludes": [
+          "Horror"
+        ]
+      }
+    }
+  ]
+}
