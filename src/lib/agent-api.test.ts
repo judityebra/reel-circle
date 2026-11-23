@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import handler from '../../api/agent'
-import { deleteAgentConversation, requestAgentTurn } from './agent-api'
+import { deleteAgentConversation, requestAgentTurn, type RelaxationPause } from './agent-api'
 import { createConversationPreferences } from './constraints'
 import type { Movie } from './recommendation'
 
@@ -131,10 +131,11 @@ describe('agent API', () => {
   })
 
   it('answers a relaxation proposal with the user decision and returns the next pause', async () => {
+    const answering: RelaxationPause = { type: 'relaxation', constraint: 'yearRange', from: [1990, 1999], to: null }
     const pause = { type: 'relaxation', constraint: 'maxRuntime', from: 90, to: 105 }
     const { fetcher, sentBody } = recordingFetcher({ conversationId: 'conv-1', pause })
-    const result = await requestAgentTurn('/api', 'No, keep the year', createConversationPreferences(), candidates, [], { conversationId: 'conv-1', decision: 'reject', fetcher })
-    expect(JSON.parse(sentBody()).decision).toBe('reject')
+    const result = await requestAgentTurn('/api', 'No, keep the year', createConversationPreferences(), candidates, [], { conversationId: 'conv-1', answer: { decision: 'reject', answering }, fetcher })
+    expect(JSON.parse(sentBody())).toMatchObject({ decision: 'reject', answering })
     expect(result.pause).toEqual(pause)
   })
 
@@ -153,5 +154,14 @@ describe('agent API', () => {
   it('reports a conversation the server could not forget', async () => {
     const fetcher = async () => ({ ok: false, status: 502, json: async () => ({}) })
     await expect(deleteAgentConversation('/api', 'conv-1', fetcher)).rejects.toThrow('502')
+  })
+
+  it('rejects an answer whose pause the browser could not render', async () => {
+    const fetcher = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ preferences: createConversationPreferences(), recommendations: [], pause: { type: 'relaxation', constraint: 'mood' }, meta: { extractionMode: 'deterministic', durationMs: 1, trace: [] } }),
+    })
+    await expect(requestAgentTurn('/api', 'Anything', createConversationPreferences(), candidates, [], { fetcher })).rejects.toThrow('invalid data')
   })
 })

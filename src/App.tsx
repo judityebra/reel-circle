@@ -37,7 +37,6 @@ const usePosterFallback = (event: SyntheticEvent<HTMLImageElement>) => {
   event.currentTarget.src = fallbackPoster
 }
 
-
 const nothingFitsYet = 'Nothing fits every hard constraint yet. Tell me which detail matters least and I will widen that boundary.'
 
 const displayValue = (locale: Locale, value: string) => {
@@ -648,7 +647,7 @@ function App() {
     turnProfiles = profiles,
     startingPreferences = conversationPreferences,
     activeConversationId = conversationId,
-    decision?: RelaxationDecision,
+    answer?: { decision: RelaxationDecision; answering: RelaxationPause },
   ) => {
     const prompt = suggestedPrompt ?? constraintPrompt
     if (!prompt.trim() || conversationStatus === 'thinking') return
@@ -662,7 +661,7 @@ function App() {
     let selectedMovieId: string | undefined
     if (apiUrl) {
       try {
-        const result = await requestAgentTurn(apiUrl, prompt, startingPreferences, movieCatalog, turnProfiles, { conversationId: activeConversationId, decision })
+        const result = await requestAgentTurn(apiUrl, prompt, startingPreferences, movieCatalog, turnProfiles, { conversationId: activeConversationId, answer })
         next = result.preferences
         if (generation === conversationGeneration.current) {
           setConversationId(result.conversationId)
@@ -709,8 +708,9 @@ function App() {
 
   /** Answers the agent's relaxation proposal; the server loosens the constraint or offers the next one. */
   const answerRelaxation = (decision: RelaxationDecision) => {
+    if (!relaxationPause) return
     const message = t(decision === 'accept' ? 'acceptRelaxationMessage' : 'keepConstraintMessage')
-    void applyConstraintPrompt(message, profiles, conversationPreferences, conversationId, decision)
+    void applyConstraintPrompt(message, profiles, conversationPreferences, conversationId, { decision, answering: relaxationPause })
   }
 
   /** Starts a new conversation and asks the server to forget the old one (it also expires after 30 days). */

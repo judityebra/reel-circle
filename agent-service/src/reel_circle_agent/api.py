@@ -111,10 +111,17 @@ def parse_conversation_id(body: Any) -> str | None:
     return body["conversationId"]
 
 
-def parse_decision(body: Any) -> RelaxationDecision | None:
-    """The user's answer to a pending relaxation, if the request carries one."""
-    decision = body.get("decision") if isinstance(body, dict) else None
-    return decision if decision in ("accept", "reject") else None
+def parse_decision(body: Any) -> tuple[RelaxationDecision, dict[str, Any]] | None:
+    """The user's answer to a relaxation, with the proposal it answers, if the request carries both."""
+    if not isinstance(body, dict) or body.get("decision") not in ("accept", "reject"):
+        return None
+    answering = body.get("answering")
+    return (body["decision"], answering) if isinstance(answering, dict) else None
+
+
+def _answers(pending: dict[str, Any], answering: dict[str, Any]) -> bool:
+    """Whether a decision is about the proposal the conversation is actually waiting on."""
+    return all(pending.get(key) == answering.get(key) for key in ("constraint", "from", "to"))
 
 
 def parse_turn(body: Any) -> TurnInput | None:
@@ -167,10 +174,12 @@ async def agent_turn(
     await remembered.store.forget_if_idle(conversation_id, now_ms)
     agent = remembered.agent
     thread = {"configurable": {"thread_id": conversation_id}}
-    paused = any(task.interrupts for task in (await agent.aget_state(thread)).tasks)
-    decision = parse_decision(body)
-    # A decision answers the pending pause; any other message starts a fresh run, which ends it.
-    run_input = Command(resume=decision) if paused and decision else {}
+    pending = [interrupt.value for task in (await agent.aget_state(thread)).tasks for interrupt in task.interrupts]
+    answer = parse_decision(body)
+    # A decision answers the pending pause only if it is about that proposal; any other message
+    # (or a stale decision) starts a fresh run, which ends the pause.
+    resumes = bool(pending and answer and _answers(pending[0], answer[1]))
+    run_input = Command(resume=answer[0]) if resumes else {}
     async with httpx.AsyncClient(transport=transport, timeout=_OUTBOUND_TIMEOUT, verify=_OUTBOUND_SSL) as client:
         settings = {
             "turn": turn,

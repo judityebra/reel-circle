@@ -200,3 +200,26 @@ describe('conversations remembered by the Python service', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 })
+
+describe('relaxation decisions when the Python service is down', () => {
+  it('applies an accepted relaxation in the TypeScript fallback instead of losing it', async () => {
+    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(503, {})))
+    const preferences = { genres: ['Horror'], excludedGenres: [], platforms: [], moods: [], lastUpdatedAt: 1 }
+    const answering = { type: 'relaxation', constraint: 'genres', from: ['Horror'], to: [] }
+    const { body } = await callRecommendationAgent({ ...turn, message: 'Yes, loosen it', preferences, decision: 'accept', answering })
+    const fallback = body as unknown as { preferences: { genres: string[] }; recommendations: unknown[] }
+    expect(fallback.preferences.genres).toEqual([])
+    expect(fallback.recommendations).toHaveLength(2)
+  })
+
+  it('forwards the proposal a decision answers', async () => {
+    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
+    const fetcher = vi.fn(async () => jsonResponse(200, pythonPayload))
+    vi.stubGlobal('fetch', fetcher)
+    const answering = { type: 'relaxation', constraint: 'maxRuntime', from: 90, to: 105 }
+    await callRecommendationAgent({ ...turn, decision: 'reject', answering })
+    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toMatchObject({ decision: 'reject', answering })
+  })
+})

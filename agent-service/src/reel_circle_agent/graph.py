@@ -70,9 +70,9 @@ class TurnState(TypedDict, total=False):
     # Persisted per conversation: preferences and turn metadata (ADR 0002).
     preferences: Preferences
     last_turn_at: int
+    extraction: dict[str, Any]
     rejected_relaxations: list[str]
     # Per run only.
-    extraction: Annotated[dict[str, Any], UntrackedValue]
     clarifying_question: Annotated[str | None, UntrackedValue]
     ranked: Annotated[list[Recommendation], UntrackedValue]
     candidates_meeting_constraints: Annotated[int, UntrackedValue]
@@ -118,8 +118,10 @@ def _current_preferences(stored: Preferences | None, turn: TurnInput, now: int) 
     return stored or sent or create_conversation_preferences(now)
 
 
-def _pending_relaxation(state: TurnState) -> Proposal | None:
-    return next_relaxation(state["preferences"], state.get("rejected_relaxations", []))
+def _next_relaxation(state: TurnState, config: RunnableConfig) -> Proposal | None:
+    """What the agent would offer to loosen next, given what the user already declined this turn."""
+    rejected = state.get("rejected_relaxations", [])
+    return next_relaxation(state["preferences"], rejected, _turn(config)["candidate_pool"])
 
 
 def _new_turn(now: int) -> dict[str, Any]:
@@ -160,7 +162,7 @@ async def filter_candidates(state: TurnState, config: RunnableConfig) -> NodeRes
 
 async def propose_relaxation(state: TurnState, config: RunnableConfig) -> NodeResult:
     """Pauses with one proposal to loosen a hard constraint; the user's decision resumes here."""
-    proposal = _pending_relaxation(state)
+    proposal = _next_relaxation(state, config)
     decision: RelaxationDecision = interrupt({"type": "relaxation", **proposal})
     constraint = proposal["constraint"]
     if decision == "accept":
@@ -173,7 +175,7 @@ async def propose_relaxation(state: TurnState, config: RunnableConfig) -> NodeRe
 def route_after_filter(state: TurnState, config: RunnableConfig) -> str:
     """Nothing fits and something can still be loosened: propose it. Otherwise carry on."""
     stuck = state["candidates_meeting_constraints"] == 0 and bool(_turn(config)["candidate_pool"])
-    return "propose_relaxation" if stuck and _pending_relaxation(state) else "semantic_retrieval"
+    return "propose_relaxation" if stuck and _next_relaxation(state, config) else "semantic_retrieval"
 
 
 async def semantic_retrieval(state: TurnState, config: RunnableConfig) -> NodeResult:

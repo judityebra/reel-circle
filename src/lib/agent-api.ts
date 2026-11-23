@@ -25,6 +25,24 @@ export type RelaxationDecision = 'accept' | 'reject'
 
 export const isRelaxationDecision = (value: unknown): value is RelaxationDecision => value === 'accept' || value === 'reject'
 
+const relaxableConstraints: readonly string[] = ['yearRange', 'languages', 'genres', 'maxRuntime', 'platforms']
+
+/** Whether a value is a relaxation proposal the browser can render and answer. */
+export const isRelaxationPause = (value: unknown): value is RelaxationPause => {
+  if (!value || typeof value !== 'object') return false
+  const pause = value as Record<string, unknown>
+  return pause.type === 'relaxation' && typeof pause.constraint === 'string' && relaxableConstraints.includes(pause.constraint)
+    && pause.from !== undefined && pause.from !== null && 'to' in pause
+}
+
+/** The preferences after an accepted relaxation: the constraint loosened as proposed (`to: null` drops it). */
+export function applyRelaxation(preferences: ConversationPreferences, pause: RelaxationPause): ConversationPreferences {
+  const relaxed: ConversationPreferences = { ...preferences }
+  if (pause.to === null) delete relaxed[pause.constraint]
+  else Object.assign(relaxed, { [pause.constraint]: pause.to })
+  return relaxed
+}
+
 /** Why /api/agent answered with the TypeScript pipeline instead of the Python service. */
 export type AgentServiceFallbackReason = 'timeout' | 'unreachable' | 'invalid-response' | `http-${number}`
 
@@ -75,8 +93,8 @@ const agentUrl = (baseUrl: string) => `${baseUrl.replace(/\/$/, '')}/agent`
 
 interface AgentTurnOptions {
   conversationId?: string
-  /** The answer to a pending relaxation; without a pending pause the server treats the turn as ordinary. */
-  decision?: RelaxationDecision
+  /** The answer to a relaxation, with the proposal it answers; if that is not the pending pause, the turn is ordinary. */
+  answer?: { decision: RelaxationDecision; answering: RelaxationPause }
   fetcher?: Fetcher
 }
 
@@ -86,7 +104,7 @@ export async function requestAgentTurn(
   preferences: ConversationPreferences,
   candidates: Movie[],
   profiles: Profile[],
-  { conversationId, decision, fetcher = fetch }: AgentTurnOptions = {},
+  { conversationId, answer, fetcher = fetch }: AgentTurnOptions = {},
 ): Promise<AgentApiResponse> {
   const response = await fetcher(agentUrl(baseUrl), {
     method: 'POST',
@@ -94,7 +112,8 @@ export async function requestAgentTurn(
     body: JSON.stringify({
       message,
       conversationId,
-      decision,
+      decision: answer?.decision,
+      answering: answer?.answering,
       preferences,
       candidates: candidates.slice(0, 250),
       profiles: profiles.slice(0, 12).map(({ id, name, color, preferredGenres, tasteWeights, featureWeights }) => ({
@@ -112,7 +131,8 @@ export async function requestAgentTurn(
   })
   if (!response.ok) throw new Error(`Agent service unavailable (${response.status})`)
   const payload = await response.json() as AgentApiResponse
-  if (!payload?.preferences || !Array.isArray(payload.recommendations) || !Array.isArray(payload.meta?.trace)) {
+  if (!payload?.preferences || !Array.isArray(payload.recommendations) || !Array.isArray(payload.meta?.trace)
+    || (payload.pause !== undefined && !isRelaxationPause(payload.pause))) {
     throw new Error('Agent service returned invalid data')
   }
   return payload

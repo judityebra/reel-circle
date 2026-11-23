@@ -61,7 +61,9 @@ def test_nothing_fitting_pauses_with_a_proposal_to_loosen_one_constraint():
 def test_accepting_a_relaxation_returns_a_shortlist_that_meets_the_relaxed_constraints():
     with TestClient(app) as client:
         paused = _turn(client, "A Korean thriller from the 1990s")
-        body = _turn(client, "Yes, any year is fine", paused["conversationId"], decision="accept")
+        body = _turn(
+            client, "Yes, any year is fine", paused["conversationId"], decision="accept", answering=paused["pause"]
+        )
     assert "pause" not in body
     assert "yearRange" not in body["preferences"]
     assert body["preferences"]["languages"] == ["ko"]
@@ -76,7 +78,7 @@ def test_rejections_walk_the_agreed_order_then_say_nothing_fits():
         proposals = []
         while "pause" in body:
             proposals.append((body["pause"]["constraint"], body["pause"]["from"], body["pause"]["to"]))
-            body = _turn(client, "No, keep that", conversation_id, decision="reject")
+            body = _turn(client, "No, keep that", conversation_id, decision="reject", answering=body["pause"])
     assert proposals == [
         ("yearRange", [1990, 1999], None),
         ("languages", ["ko"], []),
@@ -101,13 +103,13 @@ def test_runtime_is_loosened_fifteen_minutes_at_a_time():
     with TestClient(app) as client:
         body = _turn(client, "A thriller under 100 minutes")
         assert body["pause"] == {"type": "relaxation", "constraint": "genres", "from": ["Thriller"], "to": []}
-        body = _turn(client, "Keep the thriller", body["conversationId"], decision="reject")
+        body = _turn(client, "Keep the thriller", body["conversationId"], decision="reject", answering=body["pause"])
         assert body["pause"] == {"type": "relaxation", "constraint": "maxRuntime", "from": 100, "to": 115}
-        body = _turn(client, "Sure", body["conversationId"], decision="accept")
+        body = _turn(client, "Sure", body["conversationId"], decision="accept", answering=body["pause"])
         assert body["pause"] == {"type": "relaxation", "constraint": "maxRuntime", "from": 115, "to": 130}
-        body = _turn(client, "Sure", body["conversationId"], decision="accept")
+        body = _turn(client, "Sure", body["conversationId"], decision="accept", answering=body["pause"])
         assert body["pause"] == {"type": "relaxation", "constraint": "maxRuntime", "from": 130, "to": 145}
-        body = _turn(client, "Sure", body["conversationId"], decision="accept")
+        body = _turn(client, "Sure", body["conversationId"], decision="accept", answering=body["pause"])
     assert [item["movie"]["id"] for item in body["recommendations"]] == ["memories"]
     assert body["preferences"]["maxRuntime"] == 145
 
@@ -143,3 +145,55 @@ def test_a_turn_that_exceeds_the_step_limit_ends_and_says_so(tiny_step_limit):
         "durationMs": 0,
         "observation": "stopped after 3 steps",
     }
+
+
+def test_a_decision_for_a_different_proposal_is_treated_as_an_ordinary_turn():
+    with TestClient(app) as client:
+        paused = _turn(client, "A Korean thriller from the 1990s")
+        stale = {"type": "relaxation", "constraint": "languages", "from": ["ko"], "to": []}
+        body = _turn(client, "Yes, loosen it", paused["conversationId"], decision="accept", answering=stale)
+    assert body["pause"]["constraint"] == "yearRange"  # the same proposal again: nothing was loosened
+    assert body["preferences"]["languages"] == ["ko"]
+
+
+def test_runtime_is_not_proposed_once_it_already_covers_the_longest_movie():
+    with TestClient(app) as client:
+        body = _turn(client, "A Korean comedy under 140 minutes")
+        constraints = []
+        while "pause" in body:
+            constraints.append(body["pause"]["constraint"])
+            body = _turn(client, "No", body["conversationId"], decision="reject", answering=body["pause"])
+    assert constraints == ["languages", "genres"]
+    assert "nothingFits" in body
+
+
+def test_accepting_keeps_the_model_extraction_metadata_of_the_turn():
+    from reel_circle_agent.api import configured_chat_model
+
+    class StuckModel:
+        def with_structured_output(self, *_args, **_kwargs):
+            return self
+
+        async def ainvoke(self, _messages):
+            return {
+                "genres": ["Thriller"],
+                "excludedGenres": [],
+                "platforms": [],
+                "moods": [],
+                "maxRuntime": None,
+                "yearRange": [1990, 1999],
+                "languages": ["ko"],
+                "peopleCount": None,
+                "viewingContext": None,
+                "clarificationQuestion": None,
+            }
+
+    app.dependency_overrides[configured_chat_model] = lambda: StuckModel()
+    try:
+        with TestClient(app) as client:
+            paused = _turn(client, "a nineties korean thriller")
+            body = _turn(client, "Yes", paused["conversationId"], decision="accept", answering=paused["pause"])
+    finally:
+        app.dependency_overrides.pop(configured_chat_model, None)
+    assert (body["meta"]["extractionMode"], body["meta"]["modelStatus"]) == ("model", "succeeded")
+    assert [item["movie"]["id"] for item in body["recommendations"]] == ["memories"]
