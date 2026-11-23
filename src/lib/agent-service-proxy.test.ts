@@ -35,14 +35,19 @@ async function callRecommendationAgent(body: unknown): Promise<Captured> {
 
 const jsonResponse = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => body })
 
+const environmentNames = ['OPENAI_API_KEY', 'EMBEDDING_MODEL', 'EMBEDDING_BASE_URL', 'QDRANT_URL', 'AGENT_SERVICE_URL', 'AGENT_SERVICE_TIMEOUT_MS']
+const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]))
+
 beforeEach(() => {
-  for (const name of ['OPENAI_API_KEY', 'EMBEDDING_MODEL', 'EMBEDDING_BASE_URL', 'QDRANT_URL', 'AGENT_SERVICE_URL', 'AGENT_SERVICE_TIMEOUT_MS']) delete process.env[name]
+  for (const name of environmentNames) delete process.env[name]
 })
 
 afterEach(() => {
   vi.unstubAllGlobals()
-  delete process.env.AGENT_SERVICE_URL
-  delete process.env.AGENT_SERVICE_TIMEOUT_MS
+  for (const [name, value] of Object.entries(originalEnvironment)) {
+    if (value === undefined) delete process.env[name]
+    else process.env[name] = value
+  }
 })
 
 describe('recommendation agent proxy to the Python service', () => {
@@ -72,9 +77,42 @@ describe('recommendation agent proxy to the Python service', () => {
     expect(body.meta.agentService).toEqual({ mode: 'python' })
   })
 
+  it('never forwards ratings or watch history, whatever the caller sends', async () => {
+    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
+    const fetcher = vi.fn(async () => jsonResponse(200, pythonPayload))
+    vi.stubGlobal('fetch', fetcher)
+    const leakyPerson = {
+      ...persons[0],
+      tasteWeights: { Comedy: 1 },
+      featureWeights: { 'mood:Playful': 0.5 },
+      ratings: [{ title: 'Moonlight', year: 2016, rating: 5 }],
+      watched: [{ title: 'Moonlight', year: 2016 }],
+      email: 'maya@example.test',
+    }
+    await callRecommendationAgent({ ...turn, profiles: [leakyPerson] })
+    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(init.body as string).profiles).toEqual([{
+      id: 'maya', name: 'Maya', color: '#f36b35', preferredGenres: ['Comedy'],
+      tasteWeights: { Comedy: 1 }, featureWeights: { 'mood:Playful': 0.5 }, ratings: [], watched: [],
+    }])
+  })
+
+  it('ignores an unusable timeout setting and uses the default', async () => {
+    process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
+    process.env.AGENT_SERVICE_TIMEOUT_MS = '-5'
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, pythonPayload)))
+    const { body } = await callRecommendationAgent(turn)
+    expect(body.meta.agentService).toEqual({ mode: 'python' })
+  })
+
   it.each([
     ['an HTTP error', async () => jsonResponse(503, { error: 'down' }), 'http-503'],
     ['an invalid answer', async () => jsonResponse(200, { recommendations: 'nope' }), 'invalid-response'],
+    ['an answer that is not JSON', async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token') } }), 'invalid-response'],
+    ['a recommendation without an explanation', async () => jsonResponse(200, {
+      ...pythonPayload,
+      recommendations: [{ movie: movies[0], score: 77 }],
+    }), 'invalid-response'],
     ['a network failure', async () => { throw new TypeError('fetch failed') }, 'unreachable'],
   ])('falls back to the TypeScript pipeline on %s and says so', async (_case, fetcher, reason) => {
     process.env.AGENT_SERVICE_URL = 'https://agent.example.test'
