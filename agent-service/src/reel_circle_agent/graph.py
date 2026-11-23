@@ -174,7 +174,7 @@ def ask_clarifying_question(state: TurnState) -> dict[str, Any]:
     return {}
 
 
-def route_after_extract(state: TurnState, config: RunnableConfig) -> str:
+def route_after_extract(state: TurnState) -> str:
     return "ask_clarifying_question" if state.get("needs_clarification") else "filter_candidates"
 
 

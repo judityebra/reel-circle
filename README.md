@@ -1,6 +1,6 @@
 # Reel Circle
 
-A privacy-first, conversational group movie recommender that turns Letterboxd histories and natural-language requests into a fair, explainable shortlist. Reel Circle combines stateful preferences, graph-based taste signals, local neural models, and human approval gates to help a group choose what to watch.
+A privacy-first, conversational group movie recommender that turns Letterboxd histories and natural-language requests into a fair, explainable shortlist. Reel Circle combines stateful preferences, graph-based taste signals, local neural models, and human approval gates to help a group choose what to watch. Its recommendation agent runs as a Python LangGraph service that remembers each conversation, asks when a request is unclear, and asks before loosening a constraint.
 
 [**Open the live demo**](https://reel-circle-one.vercel.app/)
 
@@ -34,6 +34,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system boundaries, data flow, privacy
 
 See [docs/EVALUATION.md](docs/EVALUATION.md) for offline benchmark results, including where the models do not beat simple baselines, and their limitations. Run them with `npm run eval:recs` and `npm run eval:extraction`.
 
+See [agent-service/README.md](agent-service/README.md) for the Python recommendation agent (configuration, storage, providers, tracing) and [docs/AGENT_API.md](docs/AGENT_API.md) for the `/api/agent` contract, including pauses.
+
+See [GLOSSARY.md](GLOSSARY.md) for the project's vocabulary and [docs/adr/](docs/adr/) for the design decisions behind the agent.
+
 ## Advanced features
 
 - IndexedDB persistence for profiles, learned preferences, filters, graph positions, and feedback history.
@@ -50,13 +54,14 @@ See [docs/EVALUATION.md](docs/EVALUATION.md) for offline benchmark results, incl
 - A real TensorFlow.js neural recommender trained locally for each person.
 - A two-layer graph convolutional network with normalized movie-feature message passing and masked movie-node supervision.
 - An experiment lab comparing deterministic, MLP, and GCN rankings with confidence, loss, rank-shift, overlap, disagreement, and path metrics.
-- A bounded autonomous decision agent with typed tools, observable traces, active-learning pauses, and human approval gates.
+- A bounded in-browser lab agent with typed tools, observable traces, active-learning pauses, and human approval gates.
+- A recommendation agent that asks one clarifying question when a request gives it nothing to go on, and asks before loosening a hard constraint when nothing fits (never touching excluded genres).
 - Agent evaluation metrics and downloadable privacy-safe experiment reports.
-- GitHub Actions validation for tests, lint, build, and production dependency audit.
+- GitHub Actions validation for TypeScript and Python tests, Playwright flows, lint, builds (including the service's Docker image), and production dependency audit.
 - First-run onboarding, local backup/delete controls, resilient catalog caching, and accessible keyboard dialogs.
 - Persistent light/dark theming that defaults to the operating-system preference.
 - Persistent English/Spanish interface toggle that defaults to the browser language.
-- A focused default movie-night dashboard with the technical AI tooling behind the optional **Open AI lab** control.
+- A focused default movie-night dashboard with the technical AI tooling behind the optional **How AI picked** control.
 
 ## Neural recommender
 

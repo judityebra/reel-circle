@@ -34,7 +34,7 @@ export function averageRanks(values: number[]): number[] {
   return ranks
 }
 
-export function pearson(left: number[], right: number[]): number {
+function pearson(left: number[], right: number[]): number {
   if (left.length !== right.length || left.length < 2) return 0
   const meanLeft = mean(left)
   const meanRight = mean(right)
