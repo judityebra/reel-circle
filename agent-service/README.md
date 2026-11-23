@@ -133,7 +133,7 @@ movie, a pause or an honest nothing-fits.
   `invalid-json`). The fakes go in through the service's own dependency overrides, so the real fallback
   code runs. A turn's `fallback` expectation (`{"semantic": "qdrant-failed"}` or
   `{"model": "http-429"}`) checks the agent reported the right fallback; the scorecard shows the
-  graceful-fallback rate, and every injected turn must also still be a successful turn.
+  graceful-fallback rate: injected turns that reported the right fallback AND were successful turns.
 - `tags`: the scorecard breaks results down by tag (language, pause, constraint, multi-turn, ...).
 - `knownIssue` + `knownFailure`: an issue reference for behaviour the agent is known to get wrong, and
   the failure reason it is known for. The scenario still runs and is listed under "Known issues", out of

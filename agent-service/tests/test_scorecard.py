@@ -301,6 +301,7 @@ def test_every_injected_failure_falls_back_gracefully():
     scorecard = run_scenarios(scenarios)
     assert scorecard.failures == [], scorecard.render()
     assert scorecard.passes["fallback"] == [len(INJECTIONS), len(INJECTIONS)]
+    assert scorecard.graceful_fallbacks == [len(INJECTIONS), len(INJECTIONS)]
     assert "fallback" in scorecard.render()
 
 
@@ -321,3 +322,23 @@ def test_the_bundled_set_injects_every_failure_kind():
     injected = [scenario.inject for scenario in load_scenarios() if scenario.inject]
     kinds = {(service, failure) for inject in injected for service, failure in inject.items()}
     assert {inject_pair for inject, _ in INJECTIONS for inject_pair in inject.items()} <= kinds
+
+
+def test_a_fallback_reported_on_a_failed_turn_is_not_graceful():
+    scenario = Scenario(
+        id="reported-but-wrong",
+        lang="en",
+        tags=[],
+        inject={"qdrant": "http-500"},
+        turns=[
+            {
+                "message": "Something funny",
+                "expect": {"fallback": {"semantic": "qdrant-failed"}, "results": {"min": 99}},
+            },
+        ],
+    )
+    scorecard = run_scenarios([scenario])
+    assert scorecard.passes["fallback"] == [1, 1]  # the right reason was reported...
+    assert scorecard.graceful_fallbacks == [0, 1]  # ...but the turn failed, so it was not graceful
+    [graceful_row] = [line for line in scorecard.render().splitlines() if "graceful fallback" in line]
+    assert graceful_row.split()[2] == "0/1"

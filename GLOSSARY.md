@@ -70,6 +70,14 @@ _Avoid_: Interrupt (implementation term), approval gate (the lab agent's term)
 A scripted multi-turn conversation with the expected outcome of each turn.
 _Avoid_: Test case, example
 
+**Injected failure**:
+A service (the embedding provider, Qdrant or the chat model) made to fail on purpose in a scenario, with an HTTP error, a timeout or an invalid answer.
+_Avoid_: Mock error, chaos
+
+**Graceful fallback**:
+A turn with an injected failure that reports the expected fallback and is still a successful turn.
+_Avoid_: Fallback (on its own; see Relaxation), degradation
+
 **Successful turn**:
 A turn with no hard-constraint violations, every earlier exclusion still in force, pauses exactly where the scenario expects, at least one movie or a relaxation or an honest "nothing fits", and within the step limit. A scenario passes only when every turn succeeds.
 _Avoid_: Correct answer, pass (without saying turn or scenario)

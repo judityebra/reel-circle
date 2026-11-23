@@ -106,6 +106,8 @@ class Scorecard:
     #: evaluator -> [passed turns, turns it applied to]
     passes: dict[str, list[int]] = field(default_factory=dict)
     failures: list[Failure] = field(default_factory=list)
+    #: [injected turns that reported the right fallback AND were successful turns, injected turns]
+    graceful_fallbacks: list[int] = field(default_factory=lambda: [0, 0])
     known_failures: list[KnownFailure] = field(default_factory=list)
     fixed_known_issues: list[str] = field(default_factory=list)
     #: tag -> [passed scenarios, scenarios]
@@ -124,10 +126,12 @@ class Scorecard:
         lines = [
             f"Agent scorecard: {self.scenarios + known} scenarios ({known} with a known issue), {self.turns} turns"
         ]
-        labels = {"fallback": "graceful fallback"}
+        labels = {"fallback": "fallback reported"}
         lines += [
             row(labels.get(name, name), passed, applied) for name, (passed, applied) in self.passes.items() if applied
         ]
+        if self.graceful_fallbacks[1]:
+            lines.append(row("graceful fallback", *self.graceful_fallbacks))
         lines += [
             row("successful turns", self.successful_turns, self.turns),
             row("scenarios", self.passed_scenarios, self.scenarios),
@@ -225,6 +229,7 @@ class _ScenarioRun:
     successful_turns: int = 0
     passes: dict[str, list[int]] = field(default_factory=dict)
     failures: list[Failure] = field(default_factory=list)
+    graceful_fallbacks: list[int] = field(default_factory=lambda: [0, 0])
 
 
 @contextmanager
@@ -234,13 +239,17 @@ def _injected_faults(scenario: Scenario) -> Iterator[None]:
     environment = fault_environment(inject)
     saved = {name: os.environ.get(name) for name in environment}
     os.environ.update(environment)
+    previous = {key: app.dependency_overrides.get(key) for key in (outbound_transport, model_retry_policy)}
     app.dependency_overrides[outbound_transport] = lambda: fault_transport(inject)
     app.dependency_overrides[model_retry_policy] = lambda: RetryPolicy(base_delay_seconds=0, budget_seconds=2)
     try:
         yield
     finally:
-        app.dependency_overrides.pop(outbound_transport, None)
-        app.dependency_overrides.pop(model_retry_policy, None)
+        for key, override in previous.items():
+            if override is None:
+                app.dependency_overrides.pop(key, None)
+            else:
+                app.dependency_overrides[key] = override
         for name, value in saved.items():
             if value is None:
                 os.environ.pop(name, None)
@@ -272,6 +281,10 @@ def _run_one(client: TestClient, scenario: Scenario, defaults: dict[str, Any]) -
             if not score.passed:
                 run.failures.append(Failure(scenario.id, index, score.name, score.reason))
         turn_passed = all(score.passed for score in scores)
+        if "fallback" in turn.get("expect", {}):
+            # Graceful means the right fallback was reported AND the turn still succeeded.
+            run.graceful_fallbacks[0] += turn_passed
+            run.graceful_fallbacks[1] += 1
         run.successful_turns += turn_passed
         run.passed &= turn_passed
     if scripted and scripted.problem():
@@ -312,6 +325,8 @@ def run_scenarios(scenarios: list[Scenario]) -> Scorecard:
             scorecard.passed_scenarios += run.passed
             scorecard.turns += run.turns
             scorecard.successful_turns += run.successful_turns
+            scorecard.graceful_fallbacks[0] += run.graceful_fallbacks[0]
+            scorecard.graceful_fallbacks[1] += run.graceful_fallbacks[1]
             for name, (passed, applied) in run.passes.items():
                 scorecard.passes[name][0] += passed
                 scorecard.passes[name][1] += applied
